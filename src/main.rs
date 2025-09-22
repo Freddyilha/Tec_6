@@ -1,4 +1,4 @@
-use minifb::{Key, MouseButton, MouseMode, Window, WindowOptions};
+use minifb::{MouseButton, MouseMode, Window, WindowOptions};
 
 fn main() {
     let width = 200;
@@ -6,15 +6,16 @@ fn main() {
     let white = 0x00FFFFFF; // 16777215 Decimal value
     let red = 0x00FF0000;
     let black = 0x00080808;
-    let mut previous_x: usize = width;
-    let mut previous_y: usize = height;
     let mut buffer: Vec<u32> = vec![0; width * height];
 
     let mut window = Window::new("Moving Box", width, height, WindowOptions::default()).unwrap();
 
     let mut x = 0;
     buffer.fill(white);
+    let mut was_pressed = false;
+
     while window.is_open() && !window.is_key_down(minifb::Key::Escape) {
+        let is_pressed = window.get_mouse_down(MouseButton::Left);
         for i in 0..20 {
             for j in 0..20 {
                 let idx = (j * width + (x)) as usize;
@@ -30,20 +31,15 @@ fn main() {
             }
         }
 
-        if window.get_mouse_down(MouseButton::Left) {
+        if is_pressed && !was_pressed {
             if let Some((mx, my)) = window.get_mouse_pos(MouseMode::Clamp) {
                 let (x, y) = (mx as usize, my as usize);
 
-                if (previous_x, previous_y) != (x, y) {
-                    let idx = y * width + x;
+                let idx = y * width + x;
 
-                    println!("CLICKED ON: {}", buffer[idx]);
-                    if buffer[idx] != white {
-                        println!("CLICKED ON SOMETHING");
-                    }
-
-                    previous_x = x;
-                    previous_y = y;
+                println!("CLICKED ON: {}", buffer[idx]);
+                if buffer[idx] != white {
+                    println!("CLICKED ON SOMETHING");
                 }
             }
         }
@@ -56,6 +52,7 @@ fn main() {
             buffer[start_index..end_index].fill(black);
         }
 
+        was_pressed = is_pressed;
         window.update_with_buffer(&buffer, width, height).unwrap();
     }
 }
