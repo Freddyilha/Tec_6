@@ -53,13 +53,24 @@ fn main() {
     let mut window = Window::new("Moving Box", WIDTH, HEIGHT, WindowOptions::default()).unwrap();
     let mut x = 0;
     let mut was_pressed = false;
+    let mut dots: Vec<(usize, usize)> = Vec::new();
 
     while window.is_open() && !window.is_key_down(minifb::Key::Escape) {
         buffer.fill(WHITE);
-
         let is_pressed = window.get_mouse_down(MouseButton::Left);
 
+        if last_move.elapsed() >= move_interval {
+            x = (x + 1) % (WIDTH - red_square_size);
+            last_move = Instant::now();
+        }
+
         draw_square(&mut buffer, red_square_size, x);
+        draw_line(&mut buffer, 5, WIDTH, 100);
+        draw_circle(&mut buffer, 150, 150, 10);
+
+        for (x, y) in &dots {
+            draw_circle(&mut buffer, *x, *y, 5);
+        }
 
         if is_pressed && !was_pressed {
             if let Some((mx, my)) = window.get_mouse_pos(MouseMode::Clamp) {
@@ -70,16 +81,12 @@ fn main() {
                 if buffer[idx] != WHITE {
                     println!("CLICKED ON SOMETHING");
                 }
+
+                if buffer[idx] == WHITE {
+                    dots.push((x, y));
+                }
             }
         }
-
-        if last_move.elapsed() >= move_interval {
-            x = (x + 1) % (WIDTH - red_square_size);
-            last_move = Instant::now();
-        }
-
-        draw_line(&mut buffer, 5, WIDTH, 100);
-        draw_circle(&mut buffer, 150, 150, 10);
 
         was_pressed = is_pressed;
         window.update_with_buffer(&buffer, WIDTH, HEIGHT).unwrap();
