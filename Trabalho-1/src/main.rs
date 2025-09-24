@@ -12,19 +12,31 @@ const WHITE: u32 = 0x00FFFFFF;
 const RED: u32 = 0x00FF0000;
 const BLACK: u32 = 0x00080808;
 
-fn draw_square(side: usize, buffer: &mut Vec<u32>, top_left: usize) {
+fn draw_square(buffer: &mut Vec<u32>, side: usize, top_left: usize) {
     for i in 0..side {
         let row_start = top_left + (i * WIDTH);
         let row_end = row_start + side;
         buffer[row_start..row_end].fill(RED);
+    }
+}
 
-        if i > 0 {
-            buffer[row_start - 1] = WHITE;
+fn draw_circle(buffer: &mut [u32], cx: usize, cy: usize, radius: usize) {
+    let r2 = (radius * radius) as isize;
+
+    for y in (cy.saturating_sub(radius))..=(cy + radius).min(HEIGHT - 1) {
+        for x in (cx.saturating_sub(radius))..=(cx + radius).min(WIDTH - 1) {
+            let dx = x as isize - cx as isize;
+            let dy = y as isize - cy as isize;
+
+            if dx * dx + dy * dy <= r2 {
+                let idx = y * WIDTH + x;
+                buffer[idx] = RED;
+            }
         }
     }
 }
 
-fn draw_line(thickness: usize, size: usize, buffer: &mut Vec<u32>, top_left: usize) {
+fn draw_line(buffer: &mut Vec<u32>, thickness: usize, size: usize, top_left: usize) {
     for i in 0..thickness {
         let start_index = (top_left + i) * WIDTH;
         let end_index = start_index + size;
@@ -42,11 +54,12 @@ fn main() {
     let mut x = 0;
     let mut was_pressed = false;
 
-    buffer.fill(WHITE);
     while window.is_open() && !window.is_key_down(minifb::Key::Escape) {
+        buffer.fill(WHITE);
+
         let is_pressed = window.get_mouse_down(MouseButton::Left);
 
-        draw_square(red_square_size, &mut buffer, x);
+        draw_square(&mut buffer, red_square_size, x);
 
         if is_pressed && !was_pressed {
             if let Some((mx, my)) = window.get_mouse_pos(MouseMode::Clamp) {
@@ -65,12 +78,8 @@ fn main() {
             last_move = Instant::now();
         }
 
-        // TODO: This need to me move over to draw square since it's a fix for it
-        if x == 0 {
-            buffer.fill(WHITE);
-        }
-
-        draw_line(5, 100, &mut buffer, 100);
+        draw_line(&mut buffer, 5, WIDTH, 100);
+        draw_circle(&mut buffer, 150, 150, 10);
 
         was_pressed = is_pressed;
         window.update_with_buffer(&buffer, WIDTH, HEIGHT).unwrap();
