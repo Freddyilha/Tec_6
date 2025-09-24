@@ -1,7 +1,0 @@
-[package]
-name = "trabalho_1"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-minifb = "0.25"
