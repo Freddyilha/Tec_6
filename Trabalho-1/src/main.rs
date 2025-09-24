@@ -12,8 +12,10 @@ fn draw_square(side: usize, buffer: &mut [u32], top_left: usize) {
         let row_start = top_left + i * WIDTH;
         let row_end = row_start + side;
         buffer[row_start..row_end].fill(RED);
-        // There is still an issue here I think this is reducing the square to 19x20
-        buffer[row_start] = WHITE;
+
+        if i > 0 {
+            buffer[row_start - 1] = WHITE;
+        }
     }
 }
 
