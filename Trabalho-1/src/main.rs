@@ -1,6 +1,6 @@
 use chrono::prelude::*;
 use csv::Writer;
-use minifb::{MouseButton, MouseMode, Window, WindowOptions};
+use minifb::{MouseButton, Window, WindowOptions};
 use std::error::Error;
 use std::fs::OpenOptions;
 use std::path::Path;
@@ -141,6 +141,10 @@ fn main() {
     let mut was_pressed = false;
     let mut dots: Vec<(usize, usize)> = Vec::new();
 
+    let mut lines: Vec<(usize, usize, usize)> = Vec::new();
+    lines.push((WIDTH, 100, 0));
+    lines.push((WIDTH / 2, 50, 50));
+
     while window.is_open() && !window.is_key_down(minifb::Key::Escape) {
         buffer.fill(WHITE);
         stats.increment_frames();
@@ -152,9 +156,10 @@ fn main() {
         }
 
         draw_square(&mut buffer, red_square_size, x);
-        draw_line(&mut buffer, 5, WIDTH / 2, 50, 50);
-        draw_line(&mut buffer, 5, WIDTH, 100, 0);
-        draw_circle(&mut buffer, 150, 150, 10);
+
+        for (size, top_left, offset) in &lines {
+            draw_line(&mut buffer, 5, *size, *top_left, *offset);
+        }
 
         for (x, y) in &dots {
             draw_circle(&mut buffer, *x, *y, 5);
