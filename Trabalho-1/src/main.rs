@@ -121,23 +121,104 @@ fn draw_circle(buffer: &mut [u32], cx: usize, cy: usize, radius: usize) {
     }
 }
 
-fn draw_line(
-    buffer: &mut Vec<u32>,
-    thickness: usize,
-    lenght: usize,
-    top_left: usize,
-    offset: usize,
-) {
-    for i in 0..thickness {
-        let start_index = (top_left + i) * WIDTH + offset;
-        let end_index = start_index + lenght;
-        buffer[start_index..end_index].fill(BLACK);
+fn draw_line(buffer: &mut [u32], x0: usize, y0: usize, x1: usize, y1: usize) {
+    let mut x0 = x0 as isize;
+    let mut y0 = y0 as isize;
+    let x1 = x1 as isize;
+    let y1 = y1 as isize;
+
+    let dx = (x1 - x0).abs();
+    let sx = if x0 < x1 { 1 } else { -1 };
+    let dy = -(y1 - y0).abs();
+    let sy = if y0 < y1 { 1 } else { -1 };
+    let mut err = dx + dy;
+
+    loop {
+        if x0 >= 0 && y0 >= 0 && (x0 as usize) < WIDTH && (y0 as usize) < HEIGHT {
+            let idx = y0 as usize * WIDTH + x0 as usize;
+            buffer[idx] = BLACK;
+        }
+
+        if x0 == x1 && y0 == y1 {
+            break;
+        }
+
+        let e2 = 2 * err;
+        if e2 >= dy {
+            err += dy;
+            x0 += sx;
+        }
+        if e2 <= dx {
+            err += dx;
+            y0 += sy;
+        }
     }
 }
 
 fn is_point_on_dot(mx: usize, my: usize, dot: (usize, usize), radius: usize) -> bool {
     let (dx, dy) = (mx as isize - dot.0 as isize, my as isize - dot.1 as isize);
     dx * dx + dy * dy <= (radius as isize).pow(2)
+}
+
+fn is_click_on_line(
+    x0: usize,
+    y0: usize,
+    x1: usize,
+    y1: usize,
+    cx: usize,
+    cy: usize,
+    tolerance: usize,
+) -> bool {
+    let (x0, y0, x1, y1, cx, cy) = (
+        x0 as isize,
+        y0 as isize,
+        x1 as isize,
+        y1 as isize,
+        cx as isize,
+        cy as isize,
+    );
+
+    let vx = x1 - x0;
+    let vy = y1 - y0;
+    let wx = cx - x0;
+    let wy = cy - y0;
+
+    let c1 = wx * vx + wy * vy;
+    let c2 = vx * vx + vy * vy;
+
+    let (px, py) = if c2 <= 0 {
+        (x0, y0)
+    } else if c1 <= 0 {
+        (x0, y0)
+    } else if c1 >= c2 {
+        (x1, y1)
+    } else {
+        let numerator = c1;
+        let denominator = c2;
+        (
+            x0 + (numerator * vx) / denominator,
+            y0 + (numerator * vy) / denominator,
+        )
+    };
+
+    let dx = cx - px;
+    let dy = cy - py;
+    let dist2 = dx * dx + dy * dy;
+    dist2 <= (tolerance as isize) * (tolerance as isize)
+}
+
+fn detect_clicked_line(
+    lines: &[(usize, usize, usize, usize)],
+    cx: usize,
+    cy: usize,
+    tolerance: usize,
+) -> Option<usize> {
+    for (i, &(x0, y0, x1, y1)) in lines.iter().enumerate() {
+        if is_click_on_line(x0, y0, x1, y1, cx, cy, tolerance) {
+            return Some(i);
+        }
+    }
+    None
 }
 
 fn main() {
@@ -156,9 +237,9 @@ fn main() {
     dots.push((100, 40));
     dots.push((190, 190));
 
-    let mut lines: Vec<(usize, usize, usize)> = Vec::new();
-    lines.push((WIDTH, 100, 0));
-    lines.push((WIDTH / 2, 50, 50));
+    let mut lines: Vec<(usize, usize, usize, usize)> = Vec::new();
+    lines.push((0, 0, WIDTH - 1, HEIGHT - 1));
+    lines.push((0, HEIGHT / 2, WIDTH - 1, HEIGHT / 2));
 
     while window.is_open() && !window.is_key_down(minifb::Key::Escape) {
         buffer.fill(WHITE);
@@ -172,8 +253,8 @@ fn main() {
 
         draw_square(&mut buffer, red_square_size, x);
 
-        for (lenght, top_left, offset) in &lines {
-            draw_line(&mut buffer, 5, *lenght, *top_left, *offset);
+        for (x0, y0, x1, y1) in &lines {
+            draw_line(&mut buffer, *x0, *y0, *x1, *y1);
         }
 
         for (x, y) in &dots {
@@ -201,7 +282,8 @@ fn main() {
                     }
                 }
 
-                if buffer[idx] == BLACK {
+                if let Some(line_index) = detect_clicked_line(&lines, x, y, 3) {
+                    println!("Clicked on line {}", line_index);
                     stats.increment_click_on_lines();
                 }
             }
