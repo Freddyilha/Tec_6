@@ -21,6 +21,8 @@ struct Statistics {
     clicks_on_dots: usize,
     clicks_on_lines: usize,
     number_of_clicks: usize,
+    mouse_x: usize,
+    mouse_y: usize,
     frames_count: usize,
 }
 
@@ -30,6 +32,8 @@ impl Statistics {
             clicks_on_dots: 0,
             clicks_on_lines: 0,
             number_of_clicks: 0,
+            mouse_x: 0,
+            mouse_y: 0,
             frames_count: 0,
         }
     }
@@ -49,6 +53,14 @@ impl Statistics {
     fn increment_click_on_lines(&mut self) {
         self.clicks_on_lines += 1;
     }
+
+    fn set_mouse_x(&mut self, x: usize) {
+        self.mouse_x = x;
+    }
+
+    fn set_mouse_y(&mut self, y: usize) {
+        self.mouse_y = y;
+    }
 }
 
 fn save_statistics(stats: &Statistics) -> Result<(), Box<dyn Error>> {
@@ -64,6 +76,8 @@ fn save_statistics(stats: &Statistics) -> Result<(), Box<dyn Error>> {
             "clicks_on_dots",
             "clicks_on_lines",
             "number_of_clicks",
+            "mouse_x",
+            "mouse_y",
             "frames_count",
             "timestamp",
         ])?;
@@ -73,6 +87,8 @@ fn save_statistics(stats: &Statistics) -> Result<(), Box<dyn Error>> {
         stats.clicks_on_dots.to_string(),
         stats.clicks_on_lines.to_string(),
         stats.number_of_clicks.to_string(),
+        stats.mouse_x.to_string(),
+        stats.mouse_y.to_string(),
         stats.frames_count.to_string(),
         Local::now().to_string(),
     ])?;
@@ -115,13 +131,11 @@ fn draw_line(buffer: &mut Vec<u32>, thickness: usize, size: usize, top_left: usi
 
 fn main() {
     let move_interval = Duration::from_millis(25);
-    let statistics_interval = Duration::from_secs(1);
     let red_square_size = 20;
 
     let mut stats = Statistics::new();
     let mut buffer: Vec<u32> = vec![0; WIDTH * HEIGHT];
     let mut last_move = Instant::now();
-    let mut last_stats = Instant::now();
     let mut window = Window::new("Moving Box", WIDTH, HEIGHT, WindowOptions::default()).unwrap();
     let mut x = 0;
     let mut was_pressed = false;
@@ -146,11 +160,14 @@ fn main() {
             draw_circle(&mut buffer, *x, *y, 5);
         }
 
-        if is_pressed && !was_pressed {
-            stats.increment_clicks();
+        if let Some((mx, my)) = window.get_mouse_pos(minifb::MouseMode::Clamp) {
+            let (x, y) = (mx as usize, my as usize);
 
-            if let Some((mx, my)) = window.get_mouse_pos(MouseMode::Clamp) {
-                let (x, y) = (mx as usize, my as usize);
+            stats.set_mouse_x(x);
+            stats.set_mouse_y(y);
+
+            if is_pressed && !was_pressed {
+                stats.increment_clicks();
 
                 let idx = y * WIDTH + x;
 
@@ -168,10 +185,7 @@ fn main() {
             }
         }
 
-        if last_stats.elapsed() >= statistics_interval {
-            save_statistics(&stats).unwrap();
-            last_stats = Instant::now();
-        }
+        save_statistics(&stats).unwrap();
         was_pressed = is_pressed;
         window.update_with_buffer(&buffer, WIDTH, HEIGHT).unwrap();
     }
