@@ -235,7 +235,7 @@ fn main() {
     let mut dots: Vec<(usize, usize)> = Vec::new();
     dots.push((25, 40));
     dots.push((100, 40));
-    dots.push((190, 190));
+    dots.push((160, 190));
 
     let mut lines: Vec<(usize, usize, usize, usize)> = Vec::new();
     lines.push((0, 0, WIDTH - 1, HEIGHT - 1));
