@@ -121,12 +121,23 @@ fn draw_circle(buffer: &mut [u32], cx: usize, cy: usize, radius: usize) {
     }
 }
 
-fn draw_line(buffer: &mut Vec<u32>, thickness: usize, size: usize, top_left: usize, offset: usize) {
+fn draw_line(
+    buffer: &mut Vec<u32>,
+    thickness: usize,
+    lenght: usize,
+    top_left: usize,
+    offset: usize,
+) {
     for i in 0..thickness {
         let start_index = (top_left + i) * WIDTH + offset;
-        let end_index = start_index + size;
+        let end_index = start_index + lenght;
         buffer[start_index..end_index].fill(BLACK);
     }
+}
+
+fn is_point_on_dot(mx: usize, my: usize, dot: (usize, usize), radius: usize) -> bool {
+    let (dx, dy) = (mx as isize - dot.0 as isize, my as isize - dot.1 as isize);
+    dx * dx + dy * dy <= (radius as isize).pow(2)
 }
 
 fn main() {
@@ -139,7 +150,11 @@ fn main() {
     let mut window = Window::new("Moving Box", WIDTH, HEIGHT, WindowOptions::default()).unwrap();
     let mut x = 0;
     let mut was_pressed = false;
+
     let mut dots: Vec<(usize, usize)> = Vec::new();
+    dots.push((25, 40));
+    dots.push((100, 40));
+    dots.push((190, 190));
 
     let mut lines: Vec<(usize, usize, usize)> = Vec::new();
     lines.push((WIDTH, 100, 0));
@@ -157,8 +172,8 @@ fn main() {
 
         draw_square(&mut buffer, red_square_size, x);
 
-        for (size, top_left, offset) in &lines {
-            draw_line(&mut buffer, 5, *size, *top_left, *offset);
+        for (lenght, top_left, offset) in &lines {
+            draw_line(&mut buffer, 5, *lenght, *top_left, *offset);
         }
 
         for (x, y) in &dots {
@@ -178,14 +193,16 @@ fn main() {
 
                 if buffer[idx] == RED {
                     stats.increment_click_on_dots();
+
+                    for (i, dot) in dots.iter().enumerate() {
+                        if is_point_on_dot(x, y, *dot, 5) {
+                            println!("Clicked on dot {}", i);
+                        }
+                    }
                 }
 
                 if buffer[idx] == BLACK {
                     stats.increment_click_on_lines();
-                }
-
-                if buffer[idx] == WHITE {
-                    dots.push((x, y));
                 }
             }
         }
