@@ -1,4 +1,9 @@
+use chrono::prelude::*;
+use csv::Writer;
 use minifb::{MouseButton, MouseMode, Window, WindowOptions};
+use std::error::Error;
+use std::fs::OpenOptions;
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 /*
@@ -11,6 +16,70 @@ const HEIGHT: usize = 200;
 const WHITE: u32 = 0x00FFFFFF;
 const RED: u32 = 0x00FF0000;
 const BLACK: u32 = 0x00080808;
+
+struct Statistics {
+    clicks_on_dots: usize,
+    clicks_on_lines: usize,
+    number_of_clicks: usize,
+    frames_count: usize,
+}
+
+impl Statistics {
+    fn new() -> Self {
+        Statistics {
+            clicks_on_dots: 0,
+            clicks_on_lines: 0,
+            number_of_clicks: 0,
+            frames_count: 0,
+        }
+    }
+
+    fn increment_frames(&mut self) {
+        self.frames_count += 1;
+    }
+
+    fn increment_clicks(&mut self) {
+        self.number_of_clicks += 1;
+    }
+
+    fn increment_click_on_dots(&mut self) {
+        self.clicks_on_dots += 1;
+    }
+
+    fn increment_click_on_lines(&mut self) {
+        self.clicks_on_lines += 1;
+    }
+}
+
+fn save_statistics(stats: &Statistics) -> Result<(), Box<dyn Error>> {
+    let path = "stats.csv";
+    let file_exists = Path::new(path).exists();
+
+    let file = OpenOptions::new().append(true).create(true).open(path)?;
+
+    let mut wtr = Writer::from_writer(file);
+
+    if !file_exists {
+        wtr.write_record(&[
+            "clicks_on_dots",
+            "clicks_on_lines",
+            "number_of_clicks",
+            "frames_count",
+            "timestamp",
+        ])?;
+    }
+
+    wtr.write_record(&[
+        stats.clicks_on_dots.to_string(),
+        stats.clicks_on_lines.to_string(),
+        stats.number_of_clicks.to_string(),
+        stats.frames_count.to_string(),
+        Local::now().to_string(),
+    ])?;
+
+    wtr.flush()?;
+    Ok(())
+}
 
 fn draw_square(buffer: &mut Vec<u32>, side: usize, top_left: usize) {
     for i in 0..side {
@@ -36,9 +105,9 @@ fn draw_circle(buffer: &mut [u32], cx: usize, cy: usize, radius: usize) {
     }
 }
 
-fn draw_line(buffer: &mut Vec<u32>, thickness: usize, size: usize, top_left: usize) {
+fn draw_line(buffer: &mut Vec<u32>, thickness: usize, size: usize, top_left: usize, offset: usize) {
     for i in 0..thickness {
-        let start_index = (top_left + i) * WIDTH;
+        let start_index = (top_left + i) * WIDTH + offset;
         let end_index = start_index + size;
         buffer[start_index..end_index].fill(BLACK);
     }
@@ -46,10 +115,13 @@ fn draw_line(buffer: &mut Vec<u32>, thickness: usize, size: usize, top_left: usi
 
 fn main() {
     let move_interval = Duration::from_millis(25);
+    let statistics_interval = Duration::from_secs(1);
     let red_square_size = 20;
 
+    let mut stats = Statistics::new();
     let mut buffer: Vec<u32> = vec![0; WIDTH * HEIGHT];
     let mut last_move = Instant::now();
+    let mut last_stats = Instant::now();
     let mut window = Window::new("Moving Box", WIDTH, HEIGHT, WindowOptions::default()).unwrap();
     let mut x = 0;
     let mut was_pressed = false;
@@ -57,6 +129,7 @@ fn main() {
 
     while window.is_open() && !window.is_key_down(minifb::Key::Escape) {
         buffer.fill(WHITE);
+        stats.increment_frames();
         let is_pressed = window.get_mouse_down(MouseButton::Left);
 
         if last_move.elapsed() >= move_interval {
@@ -65,7 +138,8 @@ fn main() {
         }
 
         draw_square(&mut buffer, red_square_size, x);
-        draw_line(&mut buffer, 5, WIDTH, 100);
+        draw_line(&mut buffer, 5, WIDTH / 2, 50, 50);
+        draw_line(&mut buffer, 5, WIDTH, 100, 0);
         draw_circle(&mut buffer, 150, 150, 10);
 
         for (x, y) in &dots {
@@ -73,13 +147,19 @@ fn main() {
         }
 
         if is_pressed && !was_pressed {
+            stats.increment_clicks();
+
             if let Some((mx, my)) = window.get_mouse_pos(MouseMode::Clamp) {
                 let (x, y) = (mx as usize, my as usize);
 
                 let idx = y * WIDTH + x;
 
-                if buffer[idx] != WHITE {
-                    println!("CLICKED ON SOMETHING");
+                if buffer[idx] == RED {
+                    stats.increment_click_on_dots();
+                }
+
+                if buffer[idx] == BLACK {
+                    stats.increment_click_on_lines();
                 }
 
                 if buffer[idx] == WHITE {
@@ -88,6 +168,10 @@ fn main() {
             }
         }
 
+        if last_stats.elapsed() >= statistics_interval {
+            save_statistics(&stats).unwrap();
+            last_stats = Instant::now();
+        }
         was_pressed = is_pressed;
         window.update_with_buffer(&buffer, WIDTH, HEIGHT).unwrap();
     }
