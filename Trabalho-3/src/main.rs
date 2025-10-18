@@ -1,6 +1,6 @@
 use chrono::prelude::*;
 use csv::Writer;
-use minifb::{MouseButton, Window, WindowOptions};
+use minifb::{Key, MouseButton, Window, WindowOptions};
 use std::error::Error;
 use std::fs::OpenOptions;
 use std::path::Path;
@@ -151,65 +151,52 @@ fn is_point_on_dot(mx: usize, my: usize, dot: (usize, usize), radius: usize) -> 
     dx * dx + dy * dy <= (radius as isize).pow(2)
 }
 
-fn is_click_on_line(
-    x0: usize,
-    y0: usize,
-    x1: usize,
-    y1: usize,
-    cx: usize,
-    cy: usize,
-    tolerance: usize,
-) -> bool {
-    let (x0, y0, x1, y1, cx, cy) = (
-        x0 as isize,
-        y0 as isize,
-        x1 as isize,
-        y1 as isize,
-        cx as isize,
-        cy as isize,
-    );
-
-    let vx = x1 - x0;
-    let vy = y1 - y0;
-    let wx = cx - x0;
-    let wy = cy - y0;
-
-    let c1 = wx * vx + wy * vy;
-    let c2 = vx * vx + vy * vy;
-
-    let (px, py) = if c2 <= 0 {
-        (x0, y0)
-    } else if c1 <= 0 {
-        (x0, y0)
-    } else if c1 >= c2 {
-        (x1, y1)
-    } else {
-        let numerator = c1;
-        let denominator = c2;
-        (
-            x0 + (numerator * vx) / denominator,
-            y0 + (numerator * vy) / denominator,
-        )
-    };
-
-    let dx = cx - px;
-    let dy = cy - py;
-    let dist2 = dx * dx + dy * dy;
-    dist2 <= (tolerance as isize) * (tolerance as isize)
+fn cross_product(o: &(usize, usize), a: &(usize, usize), b: &(usize, usize)) -> isize {
+    let (ox, oy) = (o.0 as isize, o.1 as isize);
+    let (ax, ay) = (a.0 as isize, a.1 as isize);
+    let (bx, by) = (b.0 as isize, b.1 as isize);
+    (ax - ox) * (by - oy) - (ay - oy) * (bx - ox)
 }
 
-fn detect_clicked_line(
-    lines: &[(usize, usize, usize, usize)],
-    cx: usize,
-    cy: usize,
-    tolerance: usize,
-) -> Option<usize> {
-    for (i, &(x0, y0, x1, y1)) in lines.iter().enumerate() {
-        if is_click_on_line(x0, y0, x1, y1, cx, cy, tolerance) {
-            return Some(i);
+fn convex_hull(dots: &Vec<(usize, usize)>) {
+    println!("Running Convex Hull");
+
+    let mut sorted_by_x_dots = dots.clone();
+    // let mut sorted_by_y_dots = dots.clone();
+
+    for (i, dot) in dots.iter().enumerate() {
+        println!("dot-{} x:{} y:{}", i, dot.0, dot.1);
+    }
+
+    println!("-----------------------------------------------------------------");
+
+    sorted_by_x_dots.sort_by_key(|&(x, _y)| x);
+
+    let left_most = sorted_by_x_dots.first().unwrap();
+    let right_most = sorted_by_x_dots.last().unwrap();
+    println!("Left_most: {}.{}", left_most.0, left_most.1);
+    println!("Right_most: {}.{}", right_most.0, right_most.1);
+
+    println!("-----------------------------------------------------------------");
+    let mut upper: Vec<(usize, usize)> = Vec::new();
+    let mut lower: Vec<(usize, usize)> = Vec::new();
+
+    for dot in &sorted_by_x_dots {
+        if cross_product(&left_most, &right_most, &dot) > 0 {
+            upper.push(dot.clone());
+        } else {
+            lower.push(dot.clone());
         }
     }
-    None
+
+    for (i, dot) in upper.iter().enumerate() {
+        println!("dot-{} x:{} y:{}", i, dot.0, dot.1);
+    }
+
+    println!("-----------------------------------------------------------------");
+    for (i, dot) in lower.iter().enumerate() {
+        println!("dot-{} x:{} y:{}", i, dot.0, dot.1);
+    }
 }
 
 fn main() {
@@ -221,7 +208,7 @@ fn main() {
     let mut dots: Vec<(usize, usize)> = Vec::new();
     dots.push((25, 40));
     dots.push((100, 40));
-    dots.push((160, 190));
+    dots.push((160, 170));
 
     let mut lines: Vec<(usize, usize, usize, usize)> = Vec::new();
     lines.push((0, 0, WIDTH - 1, HEIGHT - 1));
@@ -234,6 +221,10 @@ fn main() {
 
         for (x, y) in &dots {
             draw_circle(&mut buffer, *x, *y, 5);
+        }
+
+        if window.is_key_pressed(Key::Space, minifb::KeyRepeat::No) {
+            convex_hull(&dots)
         }
 
         if let Some((mx, my)) = window.get_mouse_pos(minifb::MouseMode::Clamp) {
@@ -259,11 +250,6 @@ fn main() {
                             println!("Clicked on dot {}", i);
                         }
                     }
-                }
-
-                if let Some(line_index) = detect_clicked_line(&lines, x, y, 3) {
-                    println!("Clicked on line {}", line_index);
-                    stats.increment_click_on_lines();
                 }
             }
         }
