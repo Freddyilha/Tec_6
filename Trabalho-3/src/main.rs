@@ -182,9 +182,11 @@ fn convex_hull(dots: &Vec<(usize, usize)>) {
     let mut lower: Vec<(usize, usize)> = Vec::new();
 
     for dot in &sorted_by_x_dots {
-        if cross_product(&left_most, &right_most, &dot) > 0 {
+        let cross_result = cross_product(&right_most, &left_most, &dot);
+
+        if cross_result > 0 {
             upper.push(dot.clone());
-        } else {
+        } else if cross_result < 0 {
             lower.push(dot.clone());
         }
     }
