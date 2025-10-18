@@ -151,38 +151,46 @@ fn is_point_on_dot(mx: usize, my: usize, dot: (usize, usize), radius: usize) -> 
     dx * dx + dy * dy <= (radius as isize).pow(2)
 }
 
-fn cross_product(o: &(usize, usize), a: &(usize, usize), b: &(usize, usize)) -> isize {
-    let (ox, oy) = (o.0 as isize, o.1 as isize);
-    let (ax, ay) = (a.0 as isize, a.1 as isize);
-    let (bx, by) = (b.0 as isize, b.1 as isize);
-    (ax - ox) * (by - oy) - (ay - oy) * (bx - ox)
+fn distance_from_line(
+    line_start: &(usize, usize),
+    line_end: &(usize, usize),
+    point: &(usize, usize),
+) -> f64 {
+    let (x0, y0) = (line_start.0 as isize, line_start.1 as isize);
+    let (x1, y1) = (line_end.0 as isize, line_end.1 as isize);
+    let (px, py) = (point.0 as isize, point.1 as isize);
+
+    let num = ((y1 - y0) * px - (x1 - x0) * py + x1 * y0 - y1 * x0).abs() as f64;
+    let den = (((y1 - y0).pow(2) + (x1 - x0).pow(2)) as f64).sqrt();
+
+    if den == 0.0 { 0.0 } else { num / den }
 }
 
-fn convex_hull(dots: &Vec<(usize, usize)>) {
-    println!("Running Convex Hull");
+fn cross_product(
+    line_start: &(usize, usize),
+    line_end: &(usize, usize),
+    point: &(usize, usize),
+) -> isize {
+    let (x1, y1) = (line_start.0 as isize, line_start.1 as isize);
+    let (x2, y2) = (line_end.0 as isize, line_end.1 as isize);
+    let (px, py) = (point.0 as isize, point.1 as isize);
 
+    (x2 - x1) * (py - y1) - (y2 - y1) * (px - x1)
+}
+
+fn quick_hull(dots: &Vec<(usize, usize)>) -> Vec<(usize, usize)> {
+    let mut convex_hull: Vec<(usize, usize)> = Vec::new();
     let mut sorted_by_x_dots = dots.clone();
-    // let mut sorted_by_y_dots = dots.clone();
-
-    for (i, dot) in dots.iter().enumerate() {
-        println!("dot-{} x:{} y:{}", i, dot.0, dot.1);
-    }
-
-    println!("-----------------------------------------------------------------");
-
     sorted_by_x_dots.sort_by_key(|&(x, _y)| x);
 
     let left_most = sorted_by_x_dots.first().unwrap();
     let right_most = sorted_by_x_dots.last().unwrap();
-    println!("Left_most: {}.{}", left_most.0, left_most.1);
-    println!("Right_most: {}.{}", right_most.0, right_most.1);
 
-    println!("-----------------------------------------------------------------");
     let mut upper: Vec<(usize, usize)> = Vec::new();
     let mut lower: Vec<(usize, usize)> = Vec::new();
 
     for dot in &sorted_by_x_dots {
-        let cross_result = cross_product(&right_most, &left_most, &dot);
+        let cross_result = cross_product(&left_most, &right_most, &dot);
 
         if cross_result > 0 {
             upper.push(dot.clone());
@@ -191,14 +199,66 @@ fn convex_hull(dots: &Vec<(usize, usize)>) {
         }
     }
 
-    for (i, dot) in upper.iter().enumerate() {
-        println!("dot-{} x:{} y:{}", i, dot.0, dot.1);
+    convex_hull.push(left_most.clone());
+    find_hull(&upper, left_most, right_most, &mut convex_hull);
+    convex_hull.push(right_most.clone());
+    find_hull(&lower, right_most, left_most, &mut convex_hull);
+
+    convex_hull
+}
+
+fn find_hull(
+    half_dots: &Vec<(usize, usize)>,
+    start_node: &(usize, usize),
+    end_node: &(usize, usize),
+    convex_hull: &mut Vec<(usize, usize)>,
+) {
+    if half_dots.is_empty() {
+        return;
     }
 
-    println!("-----------------------------------------------------------------");
-    for (i, dot) in lower.iter().enumerate() {
-        println!("dot-{} x:{} y:{}", i, dot.0, dot.1);
+    let mut max_distance = 0.0;
+    let mut furthest_point = half_dots[0];
+
+    for &dot in half_dots.iter() {
+        let distance = distance_from_line(start_node, end_node, &dot);
+        if distance > max_distance {
+            max_distance = distance;
+            furthest_point = dot;
+        }
     }
+
+    convex_hull.push(furthest_point.clone());
+
+    let mut left_upper: Vec<(usize, usize)> = Vec::new();
+    let mut right_upper: Vec<(usize, usize)> = Vec::new();
+
+    for &p in half_dots.iter() {
+        if cross_product(start_node, &furthest_point, &p) > 0 {
+            left_upper.push(p);
+        } else if cross_product(&furthest_point, end_node, &p) > 0 {
+            right_upper.push(p);
+        }
+    }
+
+    find_hull(&left_upper, start_node, &furthest_point, convex_hull);
+    find_hull(&right_upper, &furthest_point, end_node, convex_hull);
+}
+
+fn sort_hull_points(hull: &mut Vec<(usize, usize)>) {
+    let (sum_x, sum_y): (f64, f64) = hull
+        .iter()
+        .map(|&(x, y)| (x as f64, y as f64))
+        .fold((0.0, 0.0), |(sx, sy), (x, y)| (sx + x, sy + y));
+
+    let len = hull.len() as f64;
+    let center = (sum_x / len, sum_y / len);
+
+    hull.sort_by(|a, b| {
+        let ang_a = (a.1 as f64 - center.1).atan2(a.0 as f64 - center.0);
+        let ang_b = (b.1 as f64 - center.1).atan2(b.0 as f64 - center.0);
+        ang_a.partial_cmp(&ang_b).unwrap()
+    });
 }
 
 fn main() {
@@ -213,8 +273,6 @@ fn main() {
     dots.push((160, 170));
 
     let mut lines: Vec<(usize, usize, usize, usize)> = Vec::new();
-    lines.push((0, 0, WIDTH - 1, HEIGHT - 1));
-    lines.push((0, HEIGHT / 2, WIDTH - 1, HEIGHT / 2));
 
     while window.is_open() && !window.is_key_down(minifb::Key::Escape) {
         buffer.fill(WHITE);
@@ -225,8 +283,26 @@ fn main() {
             draw_circle(&mut buffer, *x, *y, 5);
         }
 
+        for (x0, y0, x1, y1) in &lines {
+            draw_line(&mut buffer, *x0, *y0, *x1, *y1);
+        }
+
         if window.is_key_pressed(Key::Space, minifb::KeyRepeat::No) {
-            convex_hull(&dots)
+            println!("Quick Hull Running");
+            let mut hull = quick_hull(&dots);
+            sort_hull_points(&mut hull);
+            lines.clear();
+
+            for i in 1..hull.len() {
+                lines.push((hull[i - 1].0, hull[i - 1].1, hull[i].0, hull[i].1));
+            }
+
+            lines.push((
+                hull[hull.len() - 1].0,
+                hull[hull.len() - 1].1,
+                hull[0].0,
+                hull[0].1,
+            ));
         }
 
         if let Some((mx, my)) = window.get_mouse_pos(minifb::MouseMode::Clamp) {
