@@ -5,7 +5,7 @@ use rand::Rng;
 use std::error::Error;
 use std::fs::OpenOptions;
 use std::path::Path;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use sysinfo::{Pid, Process, System};
 
 /*
@@ -356,6 +356,7 @@ fn main() {
     let mut buffer: Vec<u32> = vec![0; WIDTH * HEIGHT];
     let mut window = Window::new("Moving Box", WIDTH, HEIGHT, WindowOptions::default()).unwrap();
     let mut was_pressed = false;
+    let mut last_log_time = Instant::now();
 
     let mut dots: Vec<(usize, usize)> = Vec::new();
     let mut hull: Vec<(usize, usize)> = Vec::new();
@@ -430,25 +431,21 @@ fn main() {
                 let idx = y * WIDTH + x;
 
                 if buffer[idx] == WHITE {
-                    dots.push((x, y));
+                    let (pid, mem_before, start_time) = begin_log();
 
+                    dots.push((x, y));
                     hull = quick_hull(&dots);
                     sort_hull_points(&mut hull);
-
                     draw_hull(&hull, &mut lines);
-                }
 
-                if buffer[idx] == RED {
-                    for (i, dot) in dots.iter().enumerate() {
-                        if is_point_on_dot(x, y, *dot, 5) {
-                            println!("Clicked on dot {}", i);
-                        }
-                    }
+                    end_log(pid, mem_before, start_time, &hull, &mut stats, &dots);
                 }
             }
         }
-
-        save_statistics(&stats).unwrap();
+        if last_log_time.elapsed() >= Duration::from_secs(1) {
+            save_statistics(&stats).unwrap();
+            last_log_time = Instant::now();
+        }
         was_pressed = is_pressed;
         window.update_with_buffer(&buffer, WIDTH, HEIGHT).unwrap();
     }
