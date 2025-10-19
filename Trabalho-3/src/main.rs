@@ -290,6 +290,72 @@ fn draw_hull(hull: &Vec<(usize, usize)>, lines: &mut Vec<(usize, usize, usize, u
     ));
 }
 
+pub enum Shape {
+    Square,
+    Circle,
+    Triangle,
+}
+
+pub fn generate_points(n: usize, shape: Shape, dots: &mut Vec<(usize, usize)>) {
+    let mut rng = rand::rng();
+
+    match shape {
+        Shape::Square => {
+            for _ in 0..n {
+                let x = rng.random_range(0..WIDTH);
+                let y = rng.random_range(0..HEIGHT);
+                dots.push((x, y));
+            }
+        }
+
+        Shape::Circle => {
+            let cx = WIDTH as isize / 2;
+            let cy = HEIGHT as isize / 2;
+            let r = (WIDTH.min(HEIGHT) / 3) as isize;
+
+            for _ in 0..n {
+                let angle = rng.random_range(0.0..std::f64::consts::TAU);
+
+                let radius: f64 = rng.random_range(0.0..1.0);
+                let radius = radius.sqrt() * r as f64;
+
+                let x = (cx as f64 + radius * angle.cos()) as isize;
+                let y = (cy as f64 + radius * angle.sin()) as isize;
+
+                if x >= 0 && y >= 0 {
+                    dots.push((x as usize, y as usize));
+                }
+            }
+        }
+
+        Shape::Triangle => {
+            let cx = WIDTH as isize / 2;
+            let cy = HEIGHT as isize / 2;
+            let size = (WIDTH.min(HEIGHT) / 2) as isize;
+
+            let p1 = (cx, cy - size / 2);
+            let p2 = (cx - size / 2, cy + size / 2);
+            let p3 = (cx + size / 2, cy + size / 2);
+
+            for _ in 0..n {
+                let mut u = rng.random_range(0.0..1.0);
+                let mut v = rng.random_range(0.0..1.0);
+                if u + v > 1.0 {
+                    u = 1.0 - u;
+                    v = 1.0 - v;
+                }
+
+                let x = p1.0 as f64 + u * (p2.0 - p1.0) as f64 + v * (p3.0 - p1.0) as f64;
+                let y = p1.1 as f64 + u * (p2.1 - p1.1) as f64 + v * (p3.1 - p1.1) as f64;
+
+                if x >= 0.0 && y >= 0.0 {
+                    dots.push((x as usize, y as usize));
+                }
+            }
+        }
+    }
+}
+
 fn main() {
     let mut stats = Statistics::new();
     let mut buffer: Vec<u32> = vec![0; WIDTH * HEIGHT];
@@ -316,6 +382,15 @@ fn main() {
 
         if window.is_key_pressed(Key::Space, minifb::KeyRepeat::No) {
             generate_random_points(&mut dots, 10);
+
+            hull = quick_hull(&dots);
+            sort_hull_points(&mut hull);
+
+            draw_hull(&hull, &mut lines);
+        }
+
+        if window.is_key_pressed(Key::Q, minifb::KeyRepeat::No) {
+            generate_points(50, Shape::Triangle, &mut dots);
 
             hull = quick_hull(&dots);
             sort_hull_points(&mut hull);
