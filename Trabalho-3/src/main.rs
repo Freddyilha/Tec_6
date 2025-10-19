@@ -5,6 +5,8 @@ use rand::Rng;
 use std::error::Error;
 use std::fs::OpenOptions;
 use std::path::Path;
+use std::time::Instant;
+use sysinfo::{Pid, Process, System};
 
 /*
 * The calculation for the position on a 1D array on the screen is
@@ -18,48 +20,20 @@ const RED: u32 = 0x00FF0000;
 const BLACK: u32 = 0x00080808;
 
 struct Statistics {
-    clicks_on_dots: usize,
-    clicks_on_lines: usize,
-    number_of_clicks: usize,
-    mouse_x: usize,
-    mouse_y: usize,
-    frames_count: usize,
+    points_on_hull: usize,
+    points_inside_hull: usize,
+    exec_time_ms: u128,
+    memory_kb: u64,
 }
 
 impl Statistics {
     fn new() -> Self {
         Statistics {
-            clicks_on_dots: 0,
-            clicks_on_lines: 0,
-            number_of_clicks: 0,
-            mouse_x: 0,
-            mouse_y: 0,
-            frames_count: 0,
+            points_on_hull: 0,
+            points_inside_hull: 0,
+            exec_time_ms: 0,
+            memory_kb: 0,
         }
-    }
-
-    fn increment_frames(&mut self) {
-        self.frames_count += 1;
-    }
-
-    fn increment_clicks(&mut self) {
-        self.number_of_clicks += 1;
-    }
-
-    fn increment_click_on_dots(&mut self) {
-        self.clicks_on_dots += 1;
-    }
-
-    fn increment_click_on_lines(&mut self) {
-        self.clicks_on_lines += 1;
-    }
-
-    fn set_mouse_x(&mut self, x: usize) {
-        self.mouse_x = x;
-    }
-
-    fn set_mouse_y(&mut self, y: usize) {
-        self.mouse_y = y;
     }
 }
 
@@ -73,24 +47,20 @@ fn save_statistics(stats: &Statistics) -> Result<(), Box<dyn Error>> {
 
     if !file_exists {
         wtr.write_record(&[
-            "clicks_on_dots",
-            "clicks_on_lines",
-            "number_of_clicks",
-            "mouse_x",
-            "mouse_y",
-            "frames_count",
             "timestamp",
+            "points_on_hull",
+            "points_inside_hull",
+            "exec_time_ms",
+            "memory_kb",
         ])?;
     }
 
     wtr.write_record(&[
-        stats.clicks_on_dots.to_string(),
-        stats.clicks_on_lines.to_string(),
-        stats.number_of_clicks.to_string(),
-        stats.mouse_x.to_string(),
-        stats.mouse_y.to_string(),
-        stats.frames_count.to_string(),
         Local::now().to_string(),
+        stats.points_on_hull.to_string(),
+        stats.points_inside_hull.to_string(),
+        stats.exec_time_ms.to_string(),
+        stats.memory_kb.to_string(),
     ])?;
 
     wtr.flush()?;
@@ -347,6 +317,40 @@ pub fn generate_points(amount: usize, shape: Shape, dots: &mut Vec<(usize, usize
     }
 }
 
+fn begin_log() -> (Pid, u64, Instant) {
+    let mut sys = System::new_all();
+    sys.refresh_all();
+    let pid = std::process::id();
+    let pid = Pid::from_u32(pid);
+    let mem_before = sys.process(pid).map(|p| p.memory()).unwrap_or(0);
+    let start_time = Instant::now();
+
+    (pid, mem_before, start_time)
+}
+
+fn end_log(
+    pid: Pid,
+    mem_before: u64,
+    start_time: Instant,
+    hull: &Vec<(usize, usize)>,
+    stats: &mut Statistics,
+    dots: &Vec<(usize, usize)>,
+) {
+    let duration = start_time.elapsed();
+    let mut sys = System::new_all();
+    sys.refresh_all();
+    let mem_after = sys.process(pid).map(|p| p.memory()).unwrap_or(0);
+    let mem_used = mem_after.saturating_sub(mem_before);
+
+    let points_on_hull = hull.len();
+    let points_inside_hull = dots.len().saturating_sub(points_on_hull);
+
+    stats.points_on_hull = points_on_hull;
+    stats.points_inside_hull = points_inside_hull;
+    stats.exec_time_ms = duration.as_millis();
+    stats.memory_kb = mem_used;
+}
+
 fn main() {
     let mut stats = Statistics::new();
     let mut buffer: Vec<u32> = vec![0; WIDTH * HEIGHT];
@@ -360,7 +364,6 @@ fn main() {
 
     while window.is_open() && !window.is_key_down(minifb::Key::Escape) {
         buffer.fill(WHITE);
-        stats.increment_frames();
         let is_pressed = window.get_mouse_down(MouseButton::Left);
 
         for (x, y) in &dots {
@@ -372,39 +375,47 @@ fn main() {
         }
 
         if window.is_key_pressed(Key::R, minifb::KeyRepeat::No) {
-            generate_random_points(&mut dots, 10);
+            let (pid, mem_before, start_time) = begin_log();
 
+            generate_random_points(&mut dots, 10);
             hull = quick_hull(&dots);
             sort_hull_points(&mut hull);
-
             draw_hull(&hull, &mut lines);
+
+            end_log(pid, mem_before, start_time, &hull, &mut stats, &dots);
         }
 
         if window.is_key_pressed(Key::T, minifb::KeyRepeat::No) {
-            generate_points(50, Shape::Triangle, &mut dots);
+            let (pid, mem_before, start_time) = begin_log();
 
+            generate_points(50, Shape::Triangle, &mut dots);
             hull = quick_hull(&dots);
             sort_hull_points(&mut hull);
-
             draw_hull(&hull, &mut lines);
+
+            end_log(pid, mem_before, start_time, &hull, &mut stats, &dots);
         }
 
         if window.is_key_pressed(Key::C, minifb::KeyRepeat::No) {
-            generate_points(50, Shape::Circle, &mut dots);
+            let (pid, mem_before, start_time) = begin_log();
 
+            generate_points(50, Shape::Circle, &mut dots);
             hull = quick_hull(&dots);
             sort_hull_points(&mut hull);
-
             draw_hull(&hull, &mut lines);
+
+            end_log(pid, mem_before, start_time, &hull, &mut stats, &dots);
         }
 
         if window.is_key_pressed(Key::S, minifb::KeyRepeat::No) {
-            generate_points(50, Shape::Square, &mut dots);
+            let (pid, mem_before, start_time) = begin_log();
 
+            generate_points(50, Shape::Square, &mut dots);
             hull = quick_hull(&dots);
             sort_hull_points(&mut hull);
-
             draw_hull(&hull, &mut lines);
+
+            end_log(pid, mem_before, start_time, &hull, &mut stats, &dots);
         }
 
         if window.is_key_pressed(Key::Space, minifb::KeyRepeat::No) {
@@ -415,12 +426,7 @@ fn main() {
         if let Some((mx, my)) = window.get_mouse_pos(minifb::MouseMode::Clamp) {
             let (x, y) = (mx as usize, my as usize);
 
-            stats.set_mouse_x(x);
-            stats.set_mouse_y(y);
-
             if is_pressed && !was_pressed {
-                stats.increment_clicks();
-
                 let idx = y * WIDTH + x;
 
                 if buffer[idx] == WHITE {
@@ -433,8 +439,6 @@ fn main() {
                 }
 
                 if buffer[idx] == RED {
-                    stats.increment_click_on_dots();
-
                     for (i, dot) in dots.iter().enumerate() {
                         if is_point_on_dot(x, y, *dot, 5) {
                             println!("Clicked on dot {}", i);
