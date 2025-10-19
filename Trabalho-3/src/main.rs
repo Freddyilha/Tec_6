@@ -11,8 +11,8 @@ use std::path::Path;
 * ROW = (vertical * WIDTH) + COLUMN = horizontal
 */
 
-const WIDTH: usize = 200;
-const HEIGHT: usize = 200;
+const WIDTH: usize = 400;
+const HEIGHT: usize = 400;
 const WHITE: u32 = 0x00FFFFFF;
 const RED: u32 = 0x00FF0000;
 const BLACK: u32 = 0x00080808;
