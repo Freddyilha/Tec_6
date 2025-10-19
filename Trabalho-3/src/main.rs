@@ -275,6 +275,21 @@ fn generate_random_points(dots: &mut Vec<(usize, usize)>, quantity: usize) {
     }
 }
 
+fn draw_hull(hull: &Vec<(usize, usize)>, lines: &mut Vec<(usize, usize, usize, usize)>) {
+    lines.clear();
+
+    for i in 1..hull.len() {
+        lines.push((hull[i - 1].0, hull[i - 1].1, hull[i].0, hull[i].1));
+    }
+
+    lines.push((
+        hull[hull.len() - 1].0,
+        hull[hull.len() - 1].1,
+        hull[0].0,
+        hull[0].1,
+    ));
+}
+
 fn main() {
     let mut stats = Statistics::new();
     let mut buffer: Vec<u32> = vec![0; WIDTH * HEIGHT];
@@ -282,6 +297,7 @@ fn main() {
     let mut was_pressed = false;
 
     let mut dots: Vec<(usize, usize)> = Vec::new();
+    let mut hull: Vec<(usize, usize)> = Vec::new();
 
     let mut lines: Vec<(usize, usize, usize, usize)> = Vec::new();
 
@@ -300,6 +316,11 @@ fn main() {
 
         if window.is_key_pressed(Key::Space, minifb::KeyRepeat::No) {
             generate_random_points(&mut dots, 10);
+
+            hull = quick_hull(&dots);
+            sort_hull_points(&mut hull);
+
+            draw_hull(&hull, &mut lines);
         }
 
         if let Some((mx, my)) = window.get_mouse_pos(minifb::MouseMode::Clamp) {
@@ -316,20 +337,10 @@ fn main() {
                 if buffer[idx] == WHITE {
                     dots.push((x, y));
 
-                    let mut hull = quick_hull(&dots);
+                    hull = quick_hull(&dots);
                     sort_hull_points(&mut hull);
-                    lines.clear();
 
-                    for i in 1..hull.len() {
-                        lines.push((hull[i - 1].0, hull[i - 1].1, hull[i].0, hull[i].1));
-                    }
-
-                    lines.push((
-                        hull[hull.len() - 1].0,
-                        hull[hull.len() - 1].1,
-                        hull[0].0,
-                        hull[0].1,
-                    ));
+                    draw_hull(&hull, &mut lines);
                 }
 
                 if buffer[idx] == RED {
