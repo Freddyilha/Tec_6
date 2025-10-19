@@ -371,7 +371,7 @@ fn main() {
             draw_line(&mut buffer, *x0, *y0, *x1, *y1);
         }
 
-        if window.is_key_pressed(Key::Space, minifb::KeyRepeat::No) {
+        if window.is_key_pressed(Key::R, minifb::KeyRepeat::No) {
             generate_random_points(&mut dots, 10);
 
             hull = quick_hull(&dots);
@@ -380,13 +380,36 @@ fn main() {
             draw_hull(&hull, &mut lines);
         }
 
-        if window.is_key_pressed(Key::Q, minifb::KeyRepeat::No) {
+        if window.is_key_pressed(Key::T, minifb::KeyRepeat::No) {
             generate_points(50, Shape::Triangle, &mut dots);
 
             hull = quick_hull(&dots);
             sort_hull_points(&mut hull);
 
             draw_hull(&hull, &mut lines);
+        }
+
+        if window.is_key_pressed(Key::C, minifb::KeyRepeat::No) {
+            generate_points(50, Shape::Circle, &mut dots);
+
+            hull = quick_hull(&dots);
+            sort_hull_points(&mut hull);
+
+            draw_hull(&hull, &mut lines);
+        }
+
+        if window.is_key_pressed(Key::S, minifb::KeyRepeat::No) {
+            generate_points(50, Shape::Square, &mut dots);
+
+            hull = quick_hull(&dots);
+            sort_hull_points(&mut hull);
+
+            draw_hull(&hull, &mut lines);
+        }
+
+        if window.is_key_pressed(Key::Space, minifb::KeyRepeat::No) {
+            lines.clear();
+            dots.clear();
         }
 
         if let Some((mx, my)) = window.get_mouse_pos(minifb::MouseMode::Clamp) {
