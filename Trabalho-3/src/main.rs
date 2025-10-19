@@ -1,6 +1,7 @@
 use chrono::prelude::*;
 use csv::Writer;
 use minifb::{Key, MouseButton, Window, WindowOptions};
+use rand::Rng;
 use std::error::Error;
 use std::fs::OpenOptions;
 use std::path::Path;
@@ -261,6 +262,19 @@ fn sort_hull_points(hull: &mut Vec<(usize, usize)>) {
     });
 }
 
+fn generate_random_points(dots: &mut Vec<(usize, usize)>, quantity: usize) {
+    println!("Generating {} random points", quantity);
+
+    let mut rng = rand::rng();
+
+    for _ in 0..quantity {
+        let random_x: usize = rng.random_range(0..WIDTH);
+        let random_y: usize = rng.random_range(0..HEIGHT);
+
+        dots.push((random_x, random_y));
+    }
+}
+
 fn main() {
     let mut stats = Statistics::new();
     let mut buffer: Vec<u32> = vec![0; WIDTH * HEIGHT];
@@ -282,6 +296,10 @@ fn main() {
 
         for (x0, y0, x1, y1) in &lines {
             draw_line(&mut buffer, *x0, *y0, *x1, *y1);
+        }
+
+        if window.is_key_pressed(Key::Space, minifb::KeyRepeat::No) {
+            generate_random_points(&mut dots, 10);
         }
 
         if let Some((mx, my)) = window.get_mouse_pos(minifb::MouseMode::Clamp) {
