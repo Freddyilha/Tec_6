@@ -296,61 +296,52 @@ pub enum Shape {
     Triangle,
 }
 
-pub fn generate_points(n: usize, shape: Shape, dots: &mut Vec<(usize, usize)>) {
+pub fn generate_points(amount: usize, shape: Shape, dots: &mut Vec<(usize, usize)>) {
     let mut rng = rand::rng();
 
     match shape {
-        Shape::Square => {
-            for _ in 0..n {
-                let x = rng.random_range(0..WIDTH);
-                let y = rng.random_range(0..HEIGHT);
-                dots.push((x, y));
+        Shape::Circle => {
+            let cx = WIDTH / 2;
+            let cy = HEIGHT / 2;
+            let r = WIDTH.min(HEIGHT) / 3;
+
+            for i in 0..amount {
+                let angle = (i as f64 / amount as f64) * std::f64::consts::TAU;
+                let x = (cx as f64 + r as f64 * angle.cos()).round() as usize;
+                let y = (cy as f64 + r as f64 * angle.sin()).round() as usize;
+                dots.push((x.min(WIDTH - 1), y.min(HEIGHT - 1)));
             }
         }
 
-        Shape::Circle => {
-            let cx = WIDTH as isize / 2;
-            let cy = HEIGHT as isize / 2;
-            let r = (WIDTH.min(HEIGHT) / 3) as isize;
+        Shape::Square => {
+            let margin = WIDTH.min(HEIGHT) / 4;
+            let left = margin;
+            let right = WIDTH - margin;
+            let top = margin;
+            let bottom = HEIGHT - margin;
 
-            for _ in 0..n {
-                let angle = rng.random_range(0.0..std::f64::consts::TAU);
-
-                let radius: f64 = rng.random_range(0.0..1.0);
-                let radius = radius.sqrt() * r as f64;
-
-                let x = (cx as f64 + radius * angle.cos()) as isize;
-                let y = (cy as f64 + radius * angle.sin()) as isize;
-
-                if x >= 0 && y >= 0 {
-                    dots.push((x as usize, y as usize));
+            for _ in 0..amount {
+                match rng.random_range(0..4) {
+                    0 => dots.push((rng.random_range(left..=right), top)),
+                    1 => dots.push((rng.random_range(left..=right), bottom)),
+                    2 => dots.push((left, rng.random_range(top..=bottom))),
+                    _ => dots.push((right, rng.random_range(top..=bottom))),
                 }
             }
         }
 
         Shape::Triangle => {
-            let cx = WIDTH as isize / 2;
-            let cy = HEIGHT as isize / 2;
-            let size = (WIDTH.min(HEIGHT) / 2) as isize;
+            let p1 = (WIDTH / 2, HEIGHT / 4);
+            let p2 = (WIDTH / 4, HEIGHT * 3 / 4);
+            let p3 = (WIDTH * 3 / 4, HEIGHT * 3 / 4);
+            let edges = [(p1, p2), (p2, p3), (p3, p1)];
 
-            let p1 = (cx, cy - size / 2);
-            let p2 = (cx - size / 2, cy + size / 2);
-            let p3 = (cx + size / 2, cy + size / 2);
-
-            for _ in 0..n {
-                let mut u = rng.random_range(0.0..1.0);
-                let mut v = rng.random_range(0.0..1.0);
-                if u + v > 1.0 {
-                    u = 1.0 - u;
-                    v = 1.0 - v;
-                }
-
-                let x = p1.0 as f64 + u * (p2.0 - p1.0) as f64 + v * (p3.0 - p1.0) as f64;
-                let y = p1.1 as f64 + u * (p2.1 - p1.1) as f64 + v * (p3.1 - p1.1) as f64;
-
-                if x >= 0.0 && y >= 0.0 {
-                    dots.push((x as usize, y as usize));
-                }
+            for _ in 0..amount {
+                let (start, end) = edges[rng.random_range(0..3)];
+                let t = rng.random_range(0.0..1.0);
+                let x = (start.0 as f64 + t * (end.0 as f64 - start.0 as f64)).round() as usize;
+                let y = (start.1 as f64 + t * (end.1 as f64 - start.1 as f64)).round() as usize;
+                dots.push((x.min(WIDTH - 1), y.min(HEIGHT - 1)));
             }
         }
     }
