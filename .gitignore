@@ -1,4 +1,4 @@
-Trabalho-1/target
-Trabalho-1/stats.csv
-Trabalho-3/target
-Trabalho-3/stats.csv
+**/target
+**/stats.csv
+**/Cargo.lock
+.DS_store
