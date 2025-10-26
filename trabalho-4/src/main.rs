@@ -40,6 +40,7 @@ fn main() {
 
     triangles.push((3, 5, 7));
     squares.push((50, 50, 50));
+    squares.push((250, 100, 50));
 
     let mut window = Window::new("Moving Box", WIDTH, HEIGHT, WindowOptions::default()).unwrap();
     let mut buffer: Vec<u32> = vec![0; WIDTH * HEIGHT];
@@ -55,8 +56,12 @@ fn main() {
             draw_square(&mut buffer, *x, *y, *side, BLACK);
         }
 
-        if window.is_key_pressed(Key::Space, minifb::KeyRepeat::No) {
+        if window.is_key_pressed(Key::M, minifb::KeyRepeat::No) {
             calculate_minkowski_addition(&mut squares_excess, &squares);
+        }
+
+        if window.is_key_pressed(Key::Space, minifb::KeyRepeat::No) {
+            squares_excess.clear();
         }
 
         window.update_with_buffer(&buffer, WIDTH, HEIGHT).unwrap();
