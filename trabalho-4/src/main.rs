@@ -98,22 +98,72 @@ fn draw_polygon(buffer: &mut [u32], polygon: &Polygon, color: u32) {
     fill_polygon(buffer, polygon, color);
 }
 
+fn convex_hull(points: &Vec<Point>) -> Polygon {
+    let mut pts = points.clone();
+    pts.sort_by_key(|&(x, y)| (x, y));
+
+    fn cross(o: Point, a: Point, b: Point) -> isize {
+        (a.0 as isize - o.0 as isize) * (b.1 as isize - o.1 as isize)
+            - (a.1 as isize - o.1 as isize) * (b.0 as isize - o.0 as isize)
+    }
+
+    let mut lower = Vec::new();
+    for &p in &pts {
+        while lower.len() >= 2 && cross(lower[lower.len() - 2], lower[lower.len() - 1], p) <= 0 {
+            lower.pop();
+        }
+        lower.push(p);
+    }
+
+    let mut upper = Vec::new();
+    for &p in pts.iter().rev() {
+        while upper.len() >= 2 && cross(upper[upper.len() - 2], upper[upper.len() - 1], p) <= 0 {
+            upper.pop();
+        }
+        upper.push(p);
+    }
+
+    lower.pop();
+    upper.pop();
+    lower.extend(upper);
+    lower
+}
+
 fn minkowski_sum(a: &Polygon, b: &Polygon, polygons_expanded: &mut Vec<Polygon>) {
+    let robot_center_x = b.iter().map(|&(x, _)| x as isize).sum::<isize>() / b.len() as isize;
+    let robot_center_y = b.iter().map(|&(_, y)| y as isize).sum::<isize>() / b.len() as isize;
+
+    let robot_reflected: Vec<(isize, isize)> = b
+        .iter()
+        .map(|&(x, y)| {
+            let rel_x = x as isize - robot_center_x;
+            let rel_y = y as isize - robot_center_y;
+            (-rel_x, -rel_y)
+        })
+        .collect();
+
     let mut sum: Vec<Point> = Vec::new();
-    for &(ax, ay) in a {
-        for &(bx, by) in b {
-            sum.push(((ax + bx), (ay + by)));
+    for &(ox, oy) in a {
+        for &(rx, ry) in &robot_reflected {
+            let x_result = ox as isize + rx;
+            let y_result = oy as isize + ry;
+
+            if x_result >= 0 && y_result >= 0 {
+                sum.push((x_result as usize, y_result as usize));
+            }
         }
     }
 
-    polygons_expanded.push(sum);
+    let hull = convex_hull(&sum);
+    polygons_expanded.push(hull);
 }
 
 fn main() {
     let mut polygons: Vec<Polygon> = Vec::new();
-    let mut robot: Vec<Polygon> = Vec::new();
     let mut polygons_expanded: Vec<Polygon> = Vec::new();
     polygons.push(vec![(20, 20), (60, 20), (60, 60), (20, 60)]);
+    polygons.push(vec![(200, 20), (260, 20), (260, 60), (200, 60)]);
+    polygons.push(vec![(71, 272), (91, 321), (147, 314)]);
 
     let robot: Polygon = vec![(200, 200), (240, 200), (240, 240), (200, 240)];
 
@@ -123,11 +173,11 @@ fn main() {
     while window.is_open() && !window.is_key_down(minifb::Key::Escape) {
         buffer.fill(WHITE);
 
-        draw_polygon(&mut buffer, &robot, ORANGE);
-
         for expanded in &polygons_expanded {
             draw_polygon(&mut buffer, expanded, RED);
         }
+
+        draw_polygon(&mut buffer, &robot, ORANGE);
 
         for polygon in &polygons {
             draw_polygon(&mut buffer, polygon, BLACK);
@@ -140,7 +190,7 @@ fn main() {
         }
 
         if window.is_key_pressed(Key::Space, minifb::KeyRepeat::No) {
-            polygons.clear();
+            polygons_expanded.clear();
         }
 
         window.update_with_buffer(&buffer, WIDTH, HEIGHT).unwrap();
