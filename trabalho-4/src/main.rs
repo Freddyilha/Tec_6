@@ -8,11 +8,14 @@ const RED: u32 = 0x00FF0000;
 const BLACK: u32 = 0x00080808;
 
 fn draw_square(buffer: &mut Vec<u32>, top_left: usize, side: usize) {
-    for i in 0..side {
-        let row_start = top_left + (i * WIDTH);
-        let row_end = row_start + side;
-        buffer[row_start..row_end].fill(BLACK);
-    }
+    buffer
+        .par_chunks_mut(WIDTH)
+        .enumerate()
+        .skip(top_left + side)
+        .take(side)
+        .for_each(|(_, row)| {
+            row[top_left..top_left + side].fill(BLACK);
+        });
 }
 
 fn main() {
@@ -21,7 +24,7 @@ fn main() {
     let robot_size: u8 = 4;
 
     triangles.push((3, 5, 7));
-    squares.push((20, 7));
+    squares.push((50, 50));
 
     let mut window = Window::new("Moving Box", WIDTH, HEIGHT, WindowOptions::default()).unwrap();
     let mut buffer: Vec<u32> = vec![0; WIDTH * HEIGHT];
