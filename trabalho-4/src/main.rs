@@ -1,0 +1,38 @@
+use minifb::{Key, MouseButton, Window, WindowOptions};
+use rayon::prelude::*;
+
+const WIDTH: usize = 400;
+const HEIGHT: usize = 400;
+const WHITE: u32 = 0x00FFFFFF;
+const RED: u32 = 0x00FF0000;
+const BLACK: u32 = 0x00080808;
+
+fn draw_square(buffer: &mut Vec<u32>, top_left: usize, side: usize) {
+    for i in 0..side {
+        let row_start = top_left + (i * WIDTH);
+        let row_end = row_start + side;
+        buffer[row_start..row_end].fill(BLACK);
+    }
+}
+
+fn main() {
+    let mut triangles: Vec<(usize, usize, usize)> = Vec::new();
+    let mut squares: Vec<(usize, usize)> = Vec::new();
+    let robot_size: u8 = 4;
+
+    triangles.push((3, 5, 7));
+    squares.push((20, 7));
+
+    let mut window = Window::new("Moving Box", WIDTH, HEIGHT, WindowOptions::default()).unwrap();
+    let mut buffer: Vec<u32> = vec![0; WIDTH * HEIGHT];
+
+    while window.is_open() && !window.is_key_down(minifb::Key::Escape) {
+        buffer.fill(WHITE);
+
+        for (top_left, side) in &squares {
+            draw_square(&mut buffer, *top_left, *side);
+        }
+
+        window.update_with_buffer(&buffer, WIDTH, HEIGHT).unwrap();
+    }
+}
