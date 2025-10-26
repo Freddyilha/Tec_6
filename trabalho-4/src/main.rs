@@ -6,6 +6,7 @@ const HEIGHT: usize = 400;
 const WHITE: u32 = 0x00FFFFFF;
 const RED: u32 = 0x00FF0000;
 const BLACK: u32 = 0x00080808;
+const ORANGE: u32 = 0x00FF963C;
 const ROBOT_SIZE: usize = 40;
 
 type Point = (usize, usize);
@@ -94,12 +95,27 @@ fn draw_polygon(buffer: &mut [u32], polygon: &Polygon, color: u32) {
         draw_line(buffer, x0, y0, x1, y1, color);
     }
 
-    fill_polygon(buffer, polygon, BLACK);
+    fill_polygon(buffer, polygon, color);
+}
+
+fn minkowski_sum(a: &Polygon, b: &Polygon, polygons_expanded: &mut Vec<Polygon>) {
+    let mut sum: Vec<Point> = Vec::new();
+    for &(ax, ay) in a {
+        for &(bx, by) in b {
+            sum.push(((ax + bx), (ay + by)));
+        }
+    }
+
+    polygons_expanded.push(sum);
 }
 
 fn main() {
     let mut polygons: Vec<Polygon> = Vec::new();
+    let mut robot: Vec<Polygon> = Vec::new();
+    let mut polygons_expanded: Vec<Polygon> = Vec::new();
     polygons.push(vec![(20, 20), (60, 20), (60, 60), (20, 60)]);
+
+    let robot: Polygon = vec![(200, 200), (240, 200), (240, 240), (200, 240)];
 
     let mut window = Window::new("Moving Box", WIDTH, HEIGHT, WindowOptions::default()).unwrap();
     let mut buffer: Vec<u32> = vec![0; WIDTH * HEIGHT];
@@ -107,11 +123,21 @@ fn main() {
     while window.is_open() && !window.is_key_down(minifb::Key::Escape) {
         buffer.fill(WHITE);
 
-        for polygon in &polygons {
-            draw_polygon(&mut buffer, polygon, BLACK)
+        draw_polygon(&mut buffer, &robot, ORANGE);
+
+        for expanded in &polygons_expanded {
+            draw_polygon(&mut buffer, expanded, RED);
         }
 
-        if window.is_key_pressed(Key::M, minifb::KeyRepeat::No) {}
+        for polygon in &polygons {
+            draw_polygon(&mut buffer, polygon, BLACK);
+        }
+
+        if window.is_key_pressed(Key::M, minifb::KeyRepeat::No) {
+            for polygon in &polygons {
+                minkowski_sum(polygon, &robot, &mut polygons_expanded);
+            }
+        }
 
         if window.is_key_pressed(Key::Space, minifb::KeyRepeat::No) {
             polygons.clear();
