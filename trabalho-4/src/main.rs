@@ -133,9 +133,10 @@ fn minkowski_sum(a: &Polygon, b: &Polygon, polygons_expanded: &mut Vec<Polygon>)
             let x_result = ox as isize + rx;
             let y_result = oy as isize + ry;
 
-            if x_result >= 0 && y_result >= 0 {
-                sum.push((x_result as usize, y_result as usize));
-            }
+            let x_clamped = x_result.clamp(0, WIDTH as isize - 1) as usize;
+            let y_clamped = y_result.clamp(0, HEIGHT as isize - 1) as usize;
+
+            sum.push((x_clamped, y_clamped));
         }
     }
 
