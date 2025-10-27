@@ -1,6 +1,5 @@
 use minifb::{Key, MouseButton, Window, WindowOptions};
 use rand::Rng;
-use rayon::prelude::*;
 
 const WIDTH: usize = 400;
 const HEIGHT: usize = 400;
@@ -8,24 +7,9 @@ const WHITE: u32 = 0x00FFFFFF;
 const RED: u32 = 0x00FF0000;
 const BLACK: u32 = 0x00080808;
 const ORANGE: u32 = 0x00FF963C;
-const ROBOT_SIZE: usize = 40;
 
 type Point = (usize, usize);
 type Polygon = Vec<Point>;
-
-fn calculate_minkowski_addition(
-    squares_excess: &mut Vec<(usize, usize, usize)>,
-    squares: &[(usize, usize, usize)],
-) {
-    for &(x, y, side) in squares {
-        let expanded = (
-            x.saturating_sub(ROBOT_SIZE / 2),
-            y.saturating_sub(ROBOT_SIZE / 2),
-            side + ROBOT_SIZE,
-        );
-        squares_excess.push(expanded);
-    }
-}
 
 fn draw_line(buffer: &mut [u32], x0: usize, y0: usize, x1: usize, y1: usize, color: u32) {
     let (mut x0, mut y0, x1, y1) = (x0 as i32, y0 as i32, x1 as i32, y1 as i32);
@@ -160,14 +144,14 @@ fn minkowski_sum(a: &Polygon, b: &Polygon, polygons_expanded: &mut Vec<Polygon>)
 }
 
 fn generate_random_obstacle(center_x: usize, center_y: usize, polygons: &mut Vec<Polygon>) {
-    let mut rng = rand::thread_rng();
-    let num_vertices = rng.gen_range(3..=8);
+    let mut rng = rand::rng();
+    let num_vertices = rng.random_range(3..=8);
     let max_radius = 50;
 
     let mut points: Vec<Point> = Vec::new();
     for i in 0..num_vertices {
         let angle = (i as f32 / num_vertices as f32) * 2.0 * std::f32::consts::PI;
-        let radius = rng.gen_range(20..=max_radius) as f32;
+        let radius = rng.random_range(20..=max_radius) as f32;
 
         let x = center_x as f32 + radius * angle.cos();
         let y = center_y as f32 + radius * angle.sin();
