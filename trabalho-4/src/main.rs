@@ -1,4 +1,5 @@
-use minifb::{Key, Window, WindowOptions};
+use minifb::{Key, MouseButton, Window, WindowOptions};
+use rand::Rng;
 use rayon::prelude::*;
 
 const WIDTH: usize = 400;
@@ -158,6 +159,28 @@ fn minkowski_sum(a: &Polygon, b: &Polygon, polygons_expanded: &mut Vec<Polygon>)
     polygons_expanded.push(hull);
 }
 
+fn generate_random_obstacle(center_x: usize, center_y: usize, polygons: &mut Vec<Polygon>) {
+    let mut rng = rand::thread_rng();
+    let num_vertices = rng.gen_range(3..=8);
+    let max_radius = 50;
+
+    let mut points: Vec<Point> = Vec::new();
+    for i in 0..num_vertices {
+        let angle = (i as f32 / num_vertices as f32) * 2.0 * std::f32::consts::PI;
+        let radius = rng.gen_range(20..=max_radius) as f32;
+
+        let x = center_x as f32 + radius * angle.cos();
+        let y = center_y as f32 + radius * angle.sin();
+
+        let x = (x as usize).clamp(0, WIDTH - 1);
+        let y = (y as usize).clamp(0, HEIGHT - 1);
+
+        points.push((x, y));
+    }
+
+    polygons.push(points)
+}
+
 fn main() {
     let mut polygons: Vec<Polygon> = Vec::new();
     let mut polygons_expanded: Vec<Polygon> = Vec::new();
@@ -169,9 +192,11 @@ fn main() {
 
     let mut window = Window::new("Moving Box", WIDTH, HEIGHT, WindowOptions::default()).unwrap();
     let mut buffer: Vec<u32> = vec![0; WIDTH * HEIGHT];
+    let mut was_pressed = false;
 
     while window.is_open() && !window.is_key_down(minifb::Key::Escape) {
         buffer.fill(WHITE);
+        let is_pressed = window.get_mouse_down(MouseButton::Left);
 
         for expanded in &polygons_expanded {
             draw_polygon(&mut buffer, expanded, RED);
@@ -193,6 +218,16 @@ fn main() {
             polygons_expanded.clear();
         }
 
+        if let Some((x, y)) = window.get_mouse_pos(minifb::MouseMode::Clamp) {
+            let mouse_x = x as usize;
+            let mouse_y = y as usize;
+
+            if is_pressed && !was_pressed {
+                generate_random_obstacle(mouse_x, mouse_y, &mut polygons);
+            }
+        }
+
+        was_pressed = is_pressed;
         window.update_with_buffer(&buffer, WIDTH, HEIGHT).unwrap();
     }
 }
