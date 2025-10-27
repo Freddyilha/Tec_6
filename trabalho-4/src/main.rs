@@ -300,6 +300,10 @@ fn main() {
                     distance_table.push((i, smallest_distance as usize));
                 }
             }
+
+            for x in &distance_table {
+                println!("obstacle:{}, min_distance:{}", x.0, x.1);
+            }
         }
 
         if window.is_key_pressed(Key::Space, minifb::KeyRepeat::No) {
