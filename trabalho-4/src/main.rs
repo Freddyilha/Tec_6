@@ -208,6 +208,53 @@ fn generate_random_obstacle(center_x: usize, center_y: usize, polygons: &mut Vec
     polygons.push(points)
 }
 
+fn point_to_segment_distance(px: f32, py: f32, x1: f32, y1: f32, x2: f32, y2: f32) -> f32 {
+    let dx = x2 - x1;
+    let dy = y2 - y1;
+    let len_sq = dx * dx + dy * dy;
+
+    if len_sq == 0.0 {
+        return ((px - x1) * (px - x1) + (py - y1) * (py - y1)).sqrt();
+    }
+
+    let t = ((px - x1) * dx + (py - y1) * dy) / len_sq;
+    let t = t.clamp(0.0, 1.0);
+
+    let closest_x = x1 + t * dx;
+    let closest_y = y1 + t * dy;
+
+    ((px - closest_x) * (px - closest_x) + (py - closest_y) * (py - closest_y)).sqrt()
+}
+
+fn min_distance_to_polygon_edges(point: Point, polygon: &Polygon) -> f32 {
+    let mut min_dist = f32::MAX;
+    let (px, py) = point;
+
+    for i in 0..polygon.len() {
+        let (x1, y1) = polygon[i];
+        let (x2, y2) = polygon[(i + 1) % polygon.len()];
+
+        let dist = point_to_segment_distance(
+            px as f32, py as f32, x1 as f32, y1 as f32, x2 as f32, y2 as f32,
+        );
+
+        min_dist = min_dist.min(dist);
+    }
+
+    min_dist
+}
+
+fn min_distance_polygon_to_expanded(polygon: &Polygon, expanded: &Polygon) -> f32 {
+    let mut min_dist = f32::MAX;
+
+    for &vertex in polygon {
+        let dist = min_distance_to_polygon_edges(vertex, expanded);
+        min_dist = min_dist.min(dist);
+    }
+
+    min_dist
+}
+
 fn main() {
     let mut stats = Statistics::new();
     let mut polygons: Vec<Polygon> = Vec::new();
@@ -217,6 +264,7 @@ fn main() {
     let mut window = Window::new("Moving Box", WIDTH, HEIGHT, WindowOptions::default()).unwrap();
     let mut buffer: Vec<u32> = vec![0; WIDTH * HEIGHT];
     let mut was_pressed = false;
+    let mut distance_table: Vec<(usize, usize)> = Vec::new();
 
     polygons.push(vec![(20, 20), (60, 20), (60, 60), (20, 60)]);
     polygons.push(vec![(200, 20), (260, 20), (260, 60), (200, 60)]);
@@ -242,6 +290,15 @@ fn main() {
         if window.is_key_pressed(Key::M, minifb::KeyRepeat::No) {
             for polygon in &polygons {
                 minkowski_sum(polygon, &robot, &mut polygons_expanded);
+            }
+
+            for i in 0..polygons.len() {
+                let smallest_distance =
+                    min_distance_polygon_to_expanded(&polygons[i], &polygons_expanded[i]);
+
+                if !distance_table.iter().any(|(id, _)| *id == i) {
+                    distance_table.push((i, smallest_distance as usize));
+                }
             }
         }
 
