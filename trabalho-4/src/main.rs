@@ -20,6 +20,7 @@ type Polygon = Vec<Point>;
 struct Statistics {
     obstacles_amount: usize,
     points_amount: usize,
+    time_to_finish_in_nanos: usize,
 }
 
 impl Statistics {
@@ -27,6 +28,7 @@ impl Statistics {
         Statistics {
             obstacles_amount: 0,
             points_amount: 0,
+            time_to_finish_in_nanos: 0,
         }
     }
 }
@@ -40,13 +42,19 @@ fn save_statistics(stats: &Statistics) -> Result<(), Box<dyn Error>> {
     let mut wtr = Writer::from_writer(file);
 
     if !file_exists {
-        wtr.write_record(&["timestamp", "obstacles_amount", "points_amount"])?;
+        wtr.write_record(&[
+            "timestamp",
+            "obstacles_amount",
+            "points_amount",
+            "time_to_finish_in_nanos",
+        ])?;
     }
 
     wtr.write_record(&[
         Local::now().to_string(),
         stats.obstacles_amount.to_string(),
         stats.points_amount.to_string(),
+        stats.time_to_finish_in_nanos.to_string(),
     ])?;
 
     wtr.flush()?;
@@ -288,9 +296,13 @@ fn main() {
         }
 
         if window.is_key_pressed(Key::M, minifb::KeyRepeat::No) {
+            let start_time = Instant::now();
             for polygon in &polygons {
                 minkowski_sum(polygon, &robot, &mut polygons_expanded);
             }
+            let duration = start_time.elapsed();
+
+            stats.time_to_finish_in_nanos = duration.as_nanos() as usize;
 
             for i in 0..polygons.len() {
                 let smallest_distance =
