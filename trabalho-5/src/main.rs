@@ -21,6 +21,13 @@ struct Statistics {
     time_to_finish_in_micros: usize,
 }
 
+enum Steps {
+    Obstacles,
+    Robot,
+    Destination,
+    Calculation,
+}
+
 impl Statistics {
     fn new() -> Self {
         Statistics {
@@ -117,6 +124,22 @@ fn draw_matrix(buffer: &mut Vec<u32>, columns: usize, rows: usize) {
     }
 }
 
+fn draw_circle(buffer: &mut [u32], cx: usize, cy: usize, radius: usize, color: u32) {
+    let r2 = (radius * radius) as isize;
+
+    for y in (cy.saturating_sub(radius))..=(cy + radius).min(HEIGHT - 1) {
+        for x in (cx.saturating_sub(radius))..=(cx + radius).min(WIDTH - 1) {
+            let dx = x as isize - cx as isize;
+            let dy = y as isize - cy as isize;
+
+            if dx * dx + dy * dy <= r2 {
+                let idx = y * WIDTH + x;
+                buffer[idx] = color;
+            }
+        }
+    }
+}
+
 fn main() {
     let mut stats = Statistics::new();
     let mut window =
@@ -126,13 +149,32 @@ fn main() {
     let rows: usize = 10;
     let columns: usize = 10;
     let mut grid: HashSet<(usize, usize)> = HashSet::new();
+    let mut robots: HashSet<(usize, usize)> = HashSet::new();
+    let mut end_points: HashSet<(usize, usize)> = HashSet::new();
+    let mut currect_step = Steps::Obstacles;
+    let mut dots: Vec<(usize, usize)> = Vec::new();
 
     while window.is_open() && !window.is_key_down(minifb::Key::Escape) {
         buffer.fill(WHITE);
         let is_pressed = window.get_mouse_down(MouseButton::Left);
 
         if window.is_key_pressed(Key::Space, minifb::KeyRepeat::No) {
-            println!("banana");
+            match currect_step {
+                Steps::Obstacles => {
+                    currect_step = Steps::Robot;
+                }
+                Steps::Robot => {
+                    println!("Robot");
+                    currect_step = Steps::Calculation;
+                }
+                Steps::Destination => {
+                    println!("Destination");
+                    currect_step = Steps::Calculation;
+                }
+                Steps::Calculation => {
+                    println!("Done");
+                }
+            }
         }
 
         draw_matrix(&mut buffer, rows, columns);
@@ -141,20 +183,50 @@ fn main() {
             draw_square(&mut buffer, WIDTH / rows, ((y * 100) * WIDTH) + (x * 100))
         }
 
+        for (x, y) in &robots {
+            let x_new = x * 100 + ((WIDTH / rows) / 2);
+            let y_new = y * 100 + ((HEIGHT / columns) / 2);
+
+            draw_circle(&mut buffer, x_new, y_new, 10, RED);
+        }
+
+        for (x, y) in &end_points {
+            let x_new = x * 100 + ((WIDTH / rows) / 2);
+            let y_new = y * 100 + ((HEIGHT / columns) / 2);
+
+            draw_circle(&mut buffer, x_new, y_new, 10, ORANGE);
+        }
+
         if let Some((x, y)) = window.get_mouse_pos(minifb::MouseMode::Clamp) {
             if is_pressed && !was_pressed {
                 let mouse_x = x as usize;
                 let mouse_y = y as usize;
-
                 let mod_x = mouse_x / (WIDTH / rows);
                 let mod_y = mouse_y / (HEIGHT / columns);
 
-                println!(
-                    "X:{}, Y:{}, mod_x:{}, mod_y:{}",
-                    mouse_x, mouse_y, mod_x, mod_y
-                );
+                match currect_step {
+                    Steps::Obstacles => {
+                        println!(
+                            "X:{}, Y:{}, mod_x:{}, mod_y:{}",
+                            mouse_x, mouse_y, mod_x, mod_y
+                        );
 
-                grid.insert((mod_x, mod_y));
+                        grid.insert((mod_x, mod_y));
+                    }
+                    Steps::Robot => {
+                        println!("Robot");
+                        robots.insert((mod_x, mod_y));
+                        currect_step = Steps::Destination;
+                    }
+                    Steps::Destination => {
+                        end_points.insert((mod_x, mod_y));
+                        currect_step = Steps::Robot;
+                        println!("Destination");
+                    }
+                    Steps::Calculation => {
+                        println!("Calculation");
+                    }
+                }
             }
         }
 
