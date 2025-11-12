@@ -19,10 +19,12 @@ const ORANGE: u32 = 0x00FF963C;
 
 struct Statistics {
     obstacles_amount: usize,
-    points_amount: usize,
+    start_points: usize,
+    end_points: usize,
     time_to_finish_in_micros: usize,
 }
 
+#[derive(Eq, PartialEq)]
 enum Steps {
     Obstacles,
     Start,
@@ -33,7 +35,8 @@ impl Statistics {
     fn new() -> Self {
         Statistics {
             obstacles_amount: 0,
-            points_amount: 0,
+            start_points: 0,
+            end_points: 0,
             time_to_finish_in_micros: 0,
         }
     }
@@ -51,7 +54,8 @@ fn save_statistics(stats: &Statistics) -> Result<(), Box<dyn Error>> {
         wtr.write_record(&[
             "timestamp",
             "obstacles_amount",
-            "points_amount",
+            "start_points",
+            "end_points",
             "time_to_finish_in_micros",
         ])?;
     }
@@ -59,7 +63,8 @@ fn save_statistics(stats: &Statistics) -> Result<(), Box<dyn Error>> {
     wtr.write_record(&[
         Local::now().to_string(),
         stats.obstacles_amount.to_string(),
-        stats.points_amount.to_string(),
+        stats.start_points.to_string(),
+        stats.end_points.to_string(),
         stats.time_to_finish_in_micros.to_string(),
     ])?;
 
@@ -141,8 +146,6 @@ fn draw_circle(buffer: &mut [u32], cx: usize, cy: usize, radius: usize, color: u
     }
 }
 
-// A STAR
-
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 struct Node {
     x: i32,
@@ -201,7 +204,6 @@ fn a_star(start: Node, goal: Node, walls: &HashSet<Node>) -> Option<Vec<Node>> {
 
     while let Some(State { cost: _, position }) = open_set.pop() {
         if position == goal {
-            // reconstruct path
             let mut path = vec![position];
             let mut current = position;
             while let Some(&prev) = came_from.get(&current) {
@@ -242,9 +244,8 @@ fn main() {
     let mut start_points: Vec<(usize, usize)> = Vec::new();
     let mut end_points: Vec<(usize, usize)> = Vec::new();
     let mut currect_step = Steps::Obstacles;
-    let mut dots: Vec<(usize, usize)> = Vec::new();
     let mut walls: HashSet<Node> = HashSet::new();
-    let mut lines: Vec<(Vec<(usize, usize)>)> = Vec::new();
+    let mut lines: Vec<Vec<(usize, usize)>> = Vec::new();
 
     while window.is_open() && !window.is_key_down(minifb::Key::Escape) {
         buffer.fill(WHITE);
@@ -259,29 +260,29 @@ fn main() {
         }
 
         if window.is_key_pressed(Key::A, minifb::KeyRepeat::No) {
-            lines.clear();
+            if currect_step == Steps::Start {
+                lines.clear();
 
-            for (x, y) in start_points.iter().zip(end_points.iter()) {
-                let start = Node {
-                    x: x.0 as i32,
-                    y: x.1 as i32,
-                };
-                let goal = Node {
-                    x: y.0 as i32,
-                    y: y.1 as i32,
-                };
+                for (x, y) in start_points.iter().zip(end_points.iter()) {
+                    let start = Node {
+                        x: x.0 as i32,
+                        y: x.1 as i32,
+                    };
+                    let goal = Node {
+                        x: y.0 as i32,
+                        y: y.1 as i32,
+                    };
 
-                if let Some(path) = a_star(start, goal, &walls) {
-                    println!("Path found:");
-                    let mut temp_vec: Vec<(usize, usize)> = Vec::new();
-                    for p in path {
-                        println!("({}, {})", p.x, p.y);
-                        temp_vec.push((p.x as usize, p.y as usize));
+                    if let Some(path) = a_star(start, goal, &walls) {
+                        let mut temp_vec: Vec<(usize, usize)> = Vec::new();
+                        for p in path {
+                            temp_vec.push((p.x as usize, p.y as usize));
+                        }
+
+                        lines.push(temp_vec);
+                    } else {
+                        println!("No path found — goal is blocked.");
                     }
-
-                    lines.push(temp_vec);
-                } else {
-                    println!("No path found — goal is blocked.");
                 }
             }
         }
@@ -332,25 +333,18 @@ fn main() {
 
                 match currect_step {
                     Steps::Obstacles => {
-                        println!(
-                            "X:{}, Y:{}, mod_x:{}, mod_y:{}",
-                            mouse_x, mouse_y, mod_x, mod_y
-                        );
-
                         walls.insert(Node {
                             x: mod_x as i32,
                             y: mod_y as i32,
                         });
                     }
                     Steps::Start => {
-                        println!("Start");
                         start_points.push((mod_x, mod_y));
                         currect_step = Steps::End;
                     }
                     Steps::End => {
                         end_points.push((mod_x, mod_y));
                         currect_step = Steps::Start;
-                        println!("End");
                     }
                 }
             }
