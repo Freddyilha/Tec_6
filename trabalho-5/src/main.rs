@@ -12,6 +12,8 @@ use std::time::{Duration, Instant};
 
 const WIDTH: usize = 1000;
 const HEIGHT: usize = 1000;
+const ROWS: usize = 10;
+const COLUMNS: usize = 10;
 const WHITE: u32 = 0x00FFFFFF;
 const RED: u32 = 0x00FF0000;
 const BLACK: u32 = 0x00080808;
@@ -106,25 +108,25 @@ fn draw_square(buffer: &mut Vec<u32>, length: usize, top_left: usize) {
     }
 }
 
-fn draw_matrix(buffer: &mut Vec<u32>, columns: usize, rows: usize) {
-    for i in 1..rows {
+fn draw_matrix(buffer: &mut Vec<u32>) {
+    for i in 1..ROWS {
         draw_line(
             buffer,
-            (WIDTH / rows) * i,
+            (WIDTH / ROWS) * i,
             0,
-            (WIDTH / rows) * i,
+            (WIDTH / ROWS) * i,
             HEIGHT,
             BLACK,
         );
     }
 
-    for i in 1..columns {
+    for i in 1..COLUMNS {
         draw_line(
             buffer,
             0,
-            (HEIGHT / columns) * i,
+            (HEIGHT / COLUMNS) * i,
             WIDTH,
-            (HEIGHT / columns) * i,
+            (HEIGHT / COLUMNS) * i,
             BLACK,
         );
     }
@@ -174,18 +176,29 @@ fn heuristic(a: Node, b: Node) -> i32 {
     (a.x - b.x).abs() + (a.y - b.y).abs()
 }
 
+fn in_bounds(n: Node) -> bool {
+    (0..WIDTH).contains(&(n.x as usize)) && (0..HEIGHT).contains(&(n.y as usize))
+}
+
 fn neighbors(node: Node, walls: &HashSet<Node>) -> Vec<Node> {
-    let mut result = Vec::new();
-    for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
-        let next = Node {
-            x: node.x + dx,
-            y: node.y + dy,
-        };
+    let deltas = [(1, 0), (-1, 0), (0, 1), (0, -1)];
+    let mut result = Vec::with_capacity(4);
+
+    for (dx, dy) in deltas {
+        let nx = node.x + dx;
+        let ny = node.y + dy;
+
+        if nx < 0 || ny < 0 || nx >= COLUMNS as i32 || ny >= ROWS as i32 {
+            continue;
+        }
+
+        let next = Node { x: nx, y: ny };
 
         if !walls.contains(&next) {
             result.push(next);
         }
     }
+
     result
 }
 
@@ -238,8 +251,6 @@ fn main() {
         Window::new("Navigation grid", WIDTH, HEIGHT, WindowOptions::default()).unwrap();
     let mut buffer: Vec<u32> = vec![0; WIDTH * HEIGHT];
     let mut was_pressed = false;
-    let rows: usize = 10;
-    let columns: usize = 10;
     let mut start_points: Vec<(usize, usize)> = Vec::new();
     let mut end_points: Vec<(usize, usize)> = Vec::new();
     let mut currect_step = Steps::Obstacles;
@@ -254,12 +265,34 @@ fn main() {
             currect_step = Steps::Start;
         }
 
-        if window.is_key_pressed(Key::R, minifb::KeyRepeat::No) {
+        if window.is_key_pressed(Key::O, minifb::KeyRepeat::No) {
             currect_step = Steps::Obstacles;
         }
 
+        if window.is_key_pressed(Key::Q, minifb::KeyRepeat::No) {
+            start_points.clear();
+            end_points.clear();
+            walls.clear();
+            lines.clear();
+        }
+
+        if window.is_key_pressed(Key::R, minifb::KeyRepeat::No) {
+            let mut rng = rand::rng();
+            let how_many = rng.random_range(3..=12);
+
+            for _ in 0..how_many {
+                let random_x_start = rng.random_range(0..=ROWS);
+                let random_y_start = rng.random_range(0..=ROWS);
+                start_points.push((random_x_start, random_y_start));
+
+                let random_x_end = rng.random_range(0..=COLUMNS);
+                let random_y_end = rng.random_range(0..=COLUMNS);
+                end_points.push((random_x_end, random_y_end));
+            }
+        }
+
         if window.is_key_pressed(Key::A, minifb::KeyRepeat::No) {
-            if currect_step == Steps::Start {
+            if currect_step == Steps::Start || currect_step == Steps::Obstacles {
                 lines.clear();
 
                 let start_time = Instant::now();
@@ -290,26 +323,26 @@ fn main() {
             }
         }
 
-        draw_matrix(&mut buffer, rows, columns);
+        draw_matrix(&mut buffer);
 
         for wall in &walls {
             draw_square(
                 &mut buffer,
-                WIDTH / rows,
+                WIDTH / ROWS,
                 ((wall.y as usize * 100) * WIDTH) + (wall.x as usize * 100),
             )
         }
 
         for (x, y) in &start_points {
-            let x_new = x * 100 + ((WIDTH / rows) / 2);
-            let y_new = y * 100 + ((HEIGHT / columns) / 2);
+            let x_new = x * 100 + ((WIDTH / ROWS) / 2);
+            let y_new = y * 100 + ((HEIGHT / COLUMNS) / 2);
 
             draw_circle(&mut buffer, x_new, y_new, 10, RED);
         }
 
         for (x, y) in &end_points {
-            let x_new = x * 100 + ((WIDTH / rows) / 2);
-            let y_new = y * 100 + ((HEIGHT / columns) / 2);
+            let x_new = x * 100 + ((WIDTH / ROWS) / 2);
+            let y_new = y * 100 + ((HEIGHT / COLUMNS) / 2);
 
             draw_circle(&mut buffer, x_new, y_new, 10, ORANGE);
         }
@@ -318,10 +351,10 @@ fn main() {
             for i in 1..line.len() {
                 draw_line(
                     &mut buffer,
-                    line[i - 1].0 * 100 + ((WIDTH / rows) / 2),
-                    line[i - 1].1 * 100 + ((HEIGHT / columns) / 2),
-                    line[i].0 * 100 + ((WIDTH / rows) / 2),
-                    line[i].1 * 100 + ((HEIGHT / columns) / 2),
+                    line[i - 1].0 * 100 + ((WIDTH / ROWS) / 2),
+                    line[i - 1].1 * 100 + ((HEIGHT / COLUMNS) / 2),
+                    line[i].0 * 100 + ((WIDTH / ROWS) / 2),
+                    line[i].1 * 100 + ((HEIGHT / COLUMNS) / 2),
                     BLACK,
                 );
             }
@@ -331,26 +364,40 @@ fn main() {
             if is_pressed && !was_pressed {
                 let mouse_x = x as usize;
                 let mouse_y = y as usize;
-                let mod_x = mouse_x / (WIDTH / rows);
-                let mod_y = mouse_y / (HEIGHT / columns);
+                let mod_x = mouse_x / (WIDTH / ROWS);
+                let mod_y = mouse_y / (HEIGHT / COLUMNS);
 
                 match currect_step {
                     Steps::Obstacles => {
-                        stats.obstacles_amount += 1;
-                        walls.insert(Node {
-                            x: mod_x as i32,
-                            y: mod_y as i32,
-                        });
+                        if !start_points.contains(&(mod_x, mod_y))
+                            & !end_points.contains(&(mod_x, mod_y))
+                        {
+                            stats.obstacles_amount += 1;
+                            walls.insert(Node {
+                                x: mod_x as i32,
+                                y: mod_y as i32,
+                            });
+                        }
                     }
                     Steps::Start => {
-                        stats.start_points += 1;
-                        start_points.push((mod_x, mod_y));
-                        currect_step = Steps::End;
+                        if !walls.contains(&Node {
+                            x: mod_x as i32,
+                            y: mod_y as i32,
+                        }) {
+                            stats.start_points += 1;
+                            start_points.push((mod_x, mod_y));
+                            currect_step = Steps::End;
+                        }
                     }
                     Steps::End => {
-                        stats.end_points += 1;
-                        end_points.push((mod_x, mod_y));
-                        currect_step = Steps::Start;
+                        if !walls.contains(&Node {
+                            x: mod_x as i32,
+                            y: mod_y as i32,
+                        }) {
+                            stats.end_points += 1;
+                            end_points.push((mod_x, mod_y));
+                            currect_step = Steps::Start;
+                        }
                     }
                 }
             }
