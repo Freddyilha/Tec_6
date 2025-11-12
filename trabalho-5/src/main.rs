@@ -2,7 +2,9 @@ use chrono::prelude::*;
 use csv::Writer;
 use minifb::{Key, MouseButton, Window, WindowOptions};
 use rand::Rng;
+use std::cmp::Ordering;
 use std::collections::HashSet;
+use std::collections::{BinaryHeap, HashMap};
 use std::error::Error;
 use std::fs::OpenOptions;
 use std::path::Path;
@@ -23,9 +25,8 @@ struct Statistics {
 
 enum Steps {
     Obstacles,
-    Robot,
-    Destination,
-    Calculation,
+    Start,
+    End,
 }
 
 impl Statistics {
@@ -140,6 +141,96 @@ fn draw_circle(buffer: &mut [u32], cx: usize, cy: usize, radius: usize, color: u
     }
 }
 
+// A STAR
+
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+struct Node {
+    x: i32,
+    y: i32,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+struct State {
+    cost: i32,
+    position: Node,
+}
+
+impl Ord for State {
+    fn cmp(&self, other: &Self) -> Ordering {
+        other.cost.cmp(&self.cost)
+    }
+}
+
+impl PartialOrd for State {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+fn heuristic(a: Node, b: Node) -> i32 {
+    (a.x - b.x).abs() + (a.y - b.y).abs()
+}
+
+fn neighbors(node: Node, walls: &HashSet<Node>) -> Vec<Node> {
+    let mut result = Vec::new();
+    for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+        let next = Node {
+            x: node.x + dx,
+            y: node.y + dy,
+        };
+
+        if !walls.contains(&next) {
+            result.push(next);
+        }
+    }
+    result
+}
+
+fn a_star(start: Node, goal: Node, walls: &HashSet<Node>) -> Option<Vec<Node>> {
+    use std::collections::{BinaryHeap, HashMap};
+
+    let mut open_set = BinaryHeap::new();
+    let mut came_from: HashMap<Node, Node> = HashMap::new();
+    let mut g_score: HashMap<Node, i32> = HashMap::new();
+
+    g_score.insert(start, 0);
+    open_set.push(State {
+        cost: heuristic(start, goal),
+        position: start,
+    });
+
+    while let Some(State { cost: _, position }) = open_set.pop() {
+        if position == goal {
+            // reconstruct path
+            let mut path = vec![position];
+            let mut current = position;
+            while let Some(&prev) = came_from.get(&current) {
+                path.push(prev);
+                current = prev;
+            }
+            path.reverse();
+            return Some(path);
+        }
+
+        for neighbor in neighbors(position, walls) {
+            let tentative_g = g_score.get(&position).unwrap_or(&i32::MAX) + 1;
+
+            if tentative_g < *g_score.get(&neighbor).unwrap_or(&i32::MAX) {
+                came_from.insert(neighbor, position);
+                g_score.insert(neighbor, tentative_g);
+
+                let f = tentative_g + heuristic(neighbor, goal);
+                open_set.push(State {
+                    cost: f,
+                    position: neighbor,
+                });
+            }
+        }
+    }
+
+    None
+}
+
 fn main() {
     let mut stats = Statistics::new();
     let mut window =
@@ -148,42 +239,64 @@ fn main() {
     let mut was_pressed = false;
     let rows: usize = 10;
     let columns: usize = 10;
-    let mut grid: HashSet<(usize, usize)> = HashSet::new();
-    let mut robots: HashSet<(usize, usize)> = HashSet::new();
-    let mut end_points: HashSet<(usize, usize)> = HashSet::new();
+    let mut start_points: Vec<(usize, usize)> = Vec::new();
+    let mut end_points: Vec<(usize, usize)> = Vec::new();
     let mut currect_step = Steps::Obstacles;
     let mut dots: Vec<(usize, usize)> = Vec::new();
+    let mut walls: HashSet<Node> = HashSet::new();
+    let mut lines: Vec<(Vec<(usize, usize)>)> = Vec::new();
 
     while window.is_open() && !window.is_key_down(minifb::Key::Escape) {
         buffer.fill(WHITE);
         let is_pressed = window.get_mouse_down(MouseButton::Left);
 
         if window.is_key_pressed(Key::Space, minifb::KeyRepeat::No) {
-            match currect_step {
-                Steps::Obstacles => {
-                    currect_step = Steps::Robot;
-                }
-                Steps::Robot => {
-                    println!("Robot");
-                    currect_step = Steps::Calculation;
-                }
-                Steps::Destination => {
-                    println!("Destination");
-                    currect_step = Steps::Calculation;
-                }
-                Steps::Calculation => {
-                    println!("Done");
+            currect_step = Steps::Start;
+        }
+
+        if window.is_key_pressed(Key::R, minifb::KeyRepeat::No) {
+            currect_step = Steps::Obstacles;
+        }
+
+        if window.is_key_pressed(Key::A, minifb::KeyRepeat::No) {
+            lines.clear();
+
+            for (x, y) in start_points.iter().zip(end_points.iter()) {
+                let start = Node {
+                    x: x.0 as i32,
+                    y: x.1 as i32,
+                };
+                let goal = Node {
+                    x: y.0 as i32,
+                    y: y.1 as i32,
+                };
+
+                if let Some(path) = a_star(start, goal, &walls) {
+                    println!("Path found:");
+                    let mut temp_vec: Vec<(usize, usize)> = Vec::new();
+                    for p in path {
+                        println!("({}, {})", p.x, p.y);
+                        temp_vec.push((p.x as usize, p.y as usize));
+                    }
+
+                    lines.push(temp_vec);
+                } else {
+                    println!("No path found — goal is blocked.");
                 }
             }
         }
 
         draw_matrix(&mut buffer, rows, columns);
 
-        for (x, y) in &grid {
-            draw_square(&mut buffer, WIDTH / rows, ((y * 100) * WIDTH) + (x * 100))
+        for wall in &walls {
+            draw_square(
+                &mut buffer,
+                WIDTH / rows,
+                ((wall.y as usize * 100) * WIDTH) + (wall.x as usize * 100),
+            )
         }
 
-        for (x, y) in &robots {
+        for (x, y) in &start_points {
             let x_new = x * 100 + ((WIDTH / rows) / 2);
             let y_new = y * 100 + ((HEIGHT / columns) / 2);
 
@@ -195,6 +308,19 @@ fn main() {
             let y_new = y * 100 + ((HEIGHT / columns) / 2);
 
             draw_circle(&mut buffer, x_new, y_new, 10, ORANGE);
+        }
+
+        for line in &lines {
+            for i in 1..line.len() {
+                draw_line(
+                    &mut buffer,
+                    line[i - 1].0 * 100 + ((WIDTH / rows) / 2),
+                    line[i - 1].1 * 100 + ((HEIGHT / columns) / 2),
+                    line[i].0 * 100 + ((WIDTH / rows) / 2),
+                    line[i].1 * 100 + ((HEIGHT / columns) / 2),
+                    BLACK,
+                );
+            }
         }
 
         if let Some((x, y)) = window.get_mouse_pos(minifb::MouseMode::Clamp) {
@@ -211,20 +337,20 @@ fn main() {
                             mouse_x, mouse_y, mod_x, mod_y
                         );
 
-                        grid.insert((mod_x, mod_y));
+                        walls.insert(Node {
+                            x: mod_x as i32,
+                            y: mod_y as i32,
+                        });
                     }
-                    Steps::Robot => {
-                        println!("Robot");
-                        robots.insert((mod_x, mod_y));
-                        currect_step = Steps::Destination;
+                    Steps::Start => {
+                        println!("Start");
+                        start_points.push((mod_x, mod_y));
+                        currect_step = Steps::End;
                     }
-                    Steps::Destination => {
-                        end_points.insert((mod_x, mod_y));
-                        currect_step = Steps::Robot;
-                        println!("Destination");
-                    }
-                    Steps::Calculation => {
-                        println!("Calculation");
+                    Steps::End => {
+                        end_points.push((mod_x, mod_y));
+                        currect_step = Steps::Start;
+                        println!("End");
                     }
                 }
             }
