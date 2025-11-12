@@ -190,8 +190,6 @@ fn neighbors(node: Node, walls: &HashSet<Node>) -> Vec<Node> {
 }
 
 fn a_star(start: Node, goal: Node, walls: &HashSet<Node>) -> Option<Vec<Node>> {
-    use std::collections::{BinaryHeap, HashMap};
-
     let mut open_set = BinaryHeap::new();
     let mut came_from: HashMap<Node, Node> = HashMap::new();
     let mut g_score: HashMap<Node, i32> = HashMap::new();
@@ -235,6 +233,7 @@ fn a_star(start: Node, goal: Node, walls: &HashSet<Node>) -> Option<Vec<Node>> {
 
 fn main() {
     let mut stats = Statistics::new();
+    let mut last_log_time = Instant::now();
     let mut window =
         Window::new("Navigation grid", WIDTH, HEIGHT, WindowOptions::default()).unwrap();
     let mut buffer: Vec<u32> = vec![0; WIDTH * HEIGHT];
@@ -263,6 +262,7 @@ fn main() {
             if currect_step == Steps::Start {
                 lines.clear();
 
+                let start_time = Instant::now();
                 for (x, y) in start_points.iter().zip(end_points.iter()) {
                     let start = Node {
                         x: x.0 as i32,
@@ -284,6 +284,9 @@ fn main() {
                         println!("No path found — goal is blocked.");
                     }
                 }
+                let duration = start_time.elapsed();
+
+                stats.time_to_finish_in_micros = duration.as_micros() as usize;
             }
         }
 
@@ -333,16 +336,19 @@ fn main() {
 
                 match currect_step {
                     Steps::Obstacles => {
+                        stats.obstacles_amount += 1;
                         walls.insert(Node {
                             x: mod_x as i32,
                             y: mod_y as i32,
                         });
                     }
                     Steps::Start => {
+                        stats.start_points += 1;
                         start_points.push((mod_x, mod_y));
                         currect_step = Steps::End;
                     }
                     Steps::End => {
+                        stats.end_points += 1;
                         end_points.push((mod_x, mod_y));
                         currect_step = Steps::Start;
                     }
@@ -350,6 +356,10 @@ fn main() {
             }
         }
 
+        if last_log_time.elapsed() >= Duration::from_secs(1) {
+            save_statistics(&stats).unwrap();
+            last_log_time = Instant::now();
+        }
         was_pressed = is_pressed;
         window.update_with_buffer(&buffer, WIDTH, HEIGHT).unwrap();
     }
