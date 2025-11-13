@@ -12,12 +12,14 @@ use std::time::{Duration, Instant};
 
 const WIDTH: usize = 1000;
 const HEIGHT: usize = 1000;
-const ROWS: usize = 10;
-const COLUMNS: usize = 10;
+const ROWS: usize = 20;
+const COLUMNS: usize = 20;
 const WHITE: u32 = 0x00FFFFFF;
 const RED: u32 = 0x00FF0000;
 const BLACK: u32 = 0x00080808;
 const ORANGE: u32 = 0x00FF963C;
+const CELL_WIDTH: usize = WIDTH / COLUMNS;
+const CELL_HEIGHT: usize = HEIGHT / ROWS;
 
 struct Statistics {
     obstacles_amount: usize,
@@ -101,9 +103,9 @@ fn draw_line(buffer: &mut [u32], x0: usize, y0: usize, x1: usize, y1: usize, col
 }
 
 fn draw_square(buffer: &mut Vec<u32>, length: usize, top_left: usize) {
-    for i in 0..length {
+    for i in 0..CELL_WIDTH {
         let row_start = top_left + (i * WIDTH);
-        let row_end = row_start + length;
+        let row_end = row_start + CELL_HEIGHT;
         buffer[row_start..row_end].fill(BLACK);
     }
 }
@@ -176,10 +178,6 @@ fn heuristic(a: Node, b: Node) -> i32 {
     (a.x - b.x).abs() + (a.y - b.y).abs()
 }
 
-fn in_bounds(n: Node) -> bool {
-    (0..WIDTH).contains(&(n.x as usize)) && (0..HEIGHT).contains(&(n.y as usize))
-}
-
 fn neighbors(node: Node, walls: &HashSet<Node>) -> Vec<Node> {
     let deltas = [(1, 0), (-1, 0), (0, 1), (0, -1)];
     let mut result = Vec::with_capacity(4);
@@ -188,7 +186,7 @@ fn neighbors(node: Node, walls: &HashSet<Node>) -> Vec<Node> {
         let nx = node.x + dx;
         let ny = node.y + dy;
 
-        if nx < 0 || ny < 0 || nx >= COLUMNS as i32 || ny >= ROWS as i32 {
+        if nx < 0 || ny < 0 || nx >= ROWS as i32 || ny >= COLUMNS as i32 {
             continue;
         }
 
@@ -329,20 +327,20 @@ fn main() {
             draw_square(
                 &mut buffer,
                 WIDTH / ROWS,
-                ((wall.y as usize * 100) * WIDTH) + (wall.x as usize * 100),
+                ((wall.y as usize * CELL_WIDTH) * WIDTH) + (wall.x as usize * CELL_HEIGHT),
             )
         }
 
         for (x, y) in &start_points {
-            let x_new = x * 100 + ((WIDTH / ROWS) / 2);
-            let y_new = y * 100 + ((HEIGHT / COLUMNS) / 2);
+            let x_new = x * CELL_HEIGHT + ((WIDTH / ROWS) / 2);
+            let y_new = y * CELL_WIDTH + ((HEIGHT / COLUMNS) / 2);
 
             draw_circle(&mut buffer, x_new, y_new, 10, RED);
         }
 
         for (x, y) in &end_points {
-            let x_new = x * 100 + ((WIDTH / ROWS) / 2);
-            let y_new = y * 100 + ((HEIGHT / COLUMNS) / 2);
+            let x_new = x * CELL_HEIGHT + ((WIDTH / ROWS) / 2);
+            let y_new = y * CELL_WIDTH + ((HEIGHT / COLUMNS) / 2);
 
             draw_circle(&mut buffer, x_new, y_new, 10, ORANGE);
         }
@@ -351,10 +349,10 @@ fn main() {
             for i in 1..line.len() {
                 draw_line(
                     &mut buffer,
-                    line[i - 1].0 * 100 + ((WIDTH / ROWS) / 2),
-                    line[i - 1].1 * 100 + ((HEIGHT / COLUMNS) / 2),
-                    line[i].0 * 100 + ((WIDTH / ROWS) / 2),
-                    line[i].1 * 100 + ((HEIGHT / COLUMNS) / 2),
+                    line[i - 1].0 * CELL_HEIGHT + ((WIDTH / ROWS) / 2),
+                    line[i - 1].1 * CELL_WIDTH + ((HEIGHT / COLUMNS) / 2),
+                    line[i].0 * CELL_HEIGHT + ((WIDTH / ROWS) / 2),
+                    line[i].1 * CELL_WIDTH + ((HEIGHT / COLUMNS) / 2),
                     BLACK,
                 );
             }
