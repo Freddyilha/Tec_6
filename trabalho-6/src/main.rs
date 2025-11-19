@@ -15,146 +15,117 @@ const ORANGE: u32 = 0x00FF963C;
 const CELL_WIDTH: usize = WIDTH / COLUMNS;
 const CELL_HEIGHT: usize = HEIGHT / ROWS;
 
-enum DrawParams {
-    Line {
-        x0: usize,
-        y0: usize,
-        x1: usize,
-        y1: usize,
-        color: u32,
-    },
-    Square {
-        x: usize,
-        y: usize,
-        color: u32,
-    },
-    Circle {
-        x: usize,
-        y: usize,
-        radius: usize,
-        color: u32,
-    },
+struct LineParams {
+    pub x0: usize,
+    pub y0: usize,
+    pub x1: usize,
+    pub y1: usize,
+    pub color: u32,
 }
 
-trait SelfDraw {
-    fn draw(&self, buffer: &mut [u32], params: DrawParams);
+struct SquareParams {
+    pub x: usize,
+    pub y: usize,
+    pub color: u32,
 }
 
-struct Line;
-impl SelfDraw for Line {
-    fn draw(&self, buffer: &mut [u32], params: DrawParams) {
-        if let DrawParams::Line {
-            x0,
-            y0,
-            x1,
-            y1,
-            color,
-        } = params
-        {
-            let (mut x0, mut y0, x1, y1) = (x0 as i32, y0 as i32, x1 as i32, y1 as i32);
-            let dx = (x1 - x0).abs();
-            let sx = if x0 < x1 { 1 } else { -1 };
-            let dy = -(y1 - y0).abs();
-            let sy = if y0 < y1 { 1 } else { -1 };
-            let mut err = dx + dy;
-            loop {
-                if x0 >= 0 && y0 >= 0 && (x0 as usize) < WIDTH && (y0 as usize) < HEIGHT {
-                    buffer[y0 as usize * WIDTH + x0 as usize] = color;
-                }
-                if x0 == x1 && y0 == y1 {
-                    break;
-                }
-                let e2 = 2 * err;
-                if e2 >= dy {
-                    err += dy;
-                    x0 += sx;
-                }
-                if e2 <= dx {
-                    err += dx;
-                    y0 += sy;
-                }
-            }
-        }
-    }
+struct CircleParams {
+    pub x: usize,
+    pub y: usize,
+    pub radius: usize,
+    pub color: u32,
 }
 
-struct Square;
-impl SelfDraw for Square {
-    fn draw(&self, buffer: &mut [u32], params: DrawParams) {
-        if let DrawParams::Square { x, y, color } = params {
-            let top_left = (y * CELL_WIDTH) * WIDTH + x * CELL_HEIGHT;
-            for i in 0..CELL_WIDTH {
-                let row_start = top_left + (i * WIDTH);
-                let row_end = row_start + CELL_HEIGHT;
-                buffer[row_start..row_end].fill(color);
-            }
-        }
-    }
-}
-
-struct Circle;
-impl SelfDraw for Circle {
-    fn draw(&self, buffer: &mut [u32], params: DrawParams) {
-        if let DrawParams::Circle {
-            x,
-            y,
-            radius,
-            color,
-        } = params
-        {
-            let cx = x * CELL_HEIGHT + ((WIDTH / ROWS) / 2);
-            let cy = y * CELL_WIDTH + ((HEIGHT / COLUMNS) / 2);
-
-            let r2 = (radius * radius) as isize;
-
-            for y in (cy.saturating_sub(radius))..=(cy + radius).min(HEIGHT - 1) {
-                for x in (cx.saturating_sub(radius))..=(cx + radius).min(WIDTH - 1) {
-                    let dx = x as isize - cx as isize;
-                    let dy = y as isize - cy as isize;
-
-                    if dx * dx + dy * dy <= r2 {
-                        let idx = y * WIDTH + x;
-                        buffer[idx] = color;
-                    }
-                }
-            }
-        }
-    }
-}
+struct PixelArtist;
+struct ArtistFactory;
 
 enum DrawType {
-    Line,
-    Square,
-    Circle,
+    Line(LineParams),
+    Square(SquareParams),
+    Circle(CircleParams),
 }
 
-enum Artist {
-    Line,
-    Square,
-    Circle,
+enum ArtistType {
+    Normal,
 }
 
-impl SelfDraw for Artist {
-    fn draw(&self, buffer: &mut [u32], params: DrawParams) {
-        match self {
-            Artist::Line => Line.draw(buffer, params),
-            Artist::Square => Square.draw(buffer, params),
-            Artist::Circle => Circle.draw(buffer, params),
+trait Artist {
+    fn draw(&self, buffer: &mut [u32], item: &DrawType);
+}
+
+impl Artist for PixelArtist {
+    fn draw(&self, buffer: &mut [u32], item: &DrawType) {
+        match item {
+            DrawType::Line(p) => draw_line(buffer, p),
+            DrawType::Square(p) => draw_square(buffer, p),
+            DrawType::Circle(p) => draw_circle(buffer, p),
         }
+    }
+}
+
+impl ArtistFactory {
+    fn create(kind: ArtistType) -> Box<dyn Artist> {
+        match kind {
+            ArtistType::Normal => Box::new(PixelArtist),
+        }
+    }
+}
+
+fn draw_line(buffer: &mut [u32], p: &LineParams) {
+    let (mut x0, mut y0, x1, y1) = (p.x0 as i32, p.y0 as i32, p.x1 as i32, p.y1 as i32);
+    let dx = (x1 - x0).abs();
+    let sx = if x0 < x1 { 1 } else { -1 };
+    let dy = -(y1 - y0).abs();
+    let sy = if y0 < y1 { 1 } else { -1 };
+    let mut err = dx + dy;
+    loop {
+        if x0 >= 0 && y0 >= 0 && (x0 as usize) < WIDTH && (y0 as usize) < HEIGHT {
+            buffer[y0 as usize * WIDTH + x0 as usize] = p.color;
+        }
+        if x0 == x1 && y0 == y1 {
+            break;
+        }
+        let e2 = 2 * err;
+        if e2 >= dy {
+            err += dy;
+            x0 += sx;
+        }
+        if e2 <= dx {
+            err += dx;
+            y0 += sy;
+        }
+    }
+}
+
+fn draw_circle(buffer: &mut [u32], p: &CircleParams) {
+    let cx = p.x * CELL_HEIGHT + ((WIDTH / ROWS) / 2);
+    let cy = p.y * CELL_WIDTH + ((HEIGHT / COLUMNS) / 2);
+
+    let r2 = (p.radius * p.radius) as isize;
+
+    for y in (cy.saturating_sub(p.radius))..=(cy + p.radius).min(HEIGHT - 1) {
+        for x in (cx.saturating_sub(p.radius))..=(cx + p.radius).min(WIDTH - 1) {
+            let dx = x as isize - cx as isize;
+            let dy = y as isize - cy as isize;
+
+            if dx * dx + dy * dy <= r2 {
+                let idx = y * WIDTH + x;
+                buffer[idx] = p.color;
+            }
+        }
+    }
+}
+
+fn draw_square(buffer: &mut [u32], p: &SquareParams) {
+    let top_left = (p.y * CELL_WIDTH) * WIDTH + p.x * CELL_HEIGHT;
+    for i in 0..CELL_WIDTH {
+        let row_start = top_left + (i * WIDTH);
+        let row_end = row_start + CELL_HEIGHT;
+        buffer[row_start..row_end].fill(p.color);
     }
 }
 
 struct DrawFactory;
-
-impl DrawFactory {
-    fn create(d: DrawType) -> Artist {
-        match d {
-            DrawType::Line => Artist::Line,
-            DrawType::Square => Artist::Square,
-            DrawType::Circle => Artist::Circle,
-        }
-    }
-}
 
 #[derive(Eq, PartialEq)]
 enum Steps {
@@ -200,32 +171,30 @@ fn heuristic(a: Node, b: Node) -> i32 {
     (a.x - b.x).abs() + (a.y - b.y).abs()
 }
 
-fn draw_matrix(buffer: &mut Vec<u32>) {
-    let line_drawer = DrawFactory::create(DrawType::Line);
-
+fn draw_matrix(buffer: &mut Vec<u32>, artist: &dyn Artist) {
     for i in 1..ROWS {
-        line_drawer.draw(
+        artist.draw(
             buffer,
-            DrawParams::Line {
+            &DrawType::Line(LineParams {
                 x0: (WIDTH / ROWS) * i,
                 y0: 0,
                 x1: (WIDTH / ROWS) * i,
                 y1: HEIGHT,
                 color: BLACK,
-            },
+            }),
         );
     }
 
     for i in 1..COLUMNS {
-        line_drawer.draw(
+        artist.draw(
             buffer,
-            DrawParams::Line {
+            &DrawType::Line(LineParams {
                 x0: 0,
                 y0: (HEIGHT / COLUMNS) * i,
                 x1: WIDTH,
                 y1: (HEIGHT / COLUMNS) * i,
                 color: BLACK,
-            },
+            }),
         );
     }
 }
@@ -305,9 +274,7 @@ fn main() {
     let mut walls: HashSet<Node> = HashSet::new();
     let mut lines: Vec<Vec<(usize, usize)>> = Vec::new();
 
-    let line_drawer = DrawFactory::create(DrawType::Line);
-    let circle_drawer = DrawFactory::create(DrawType::Circle);
-    let square_drawer = DrawFactory::create(DrawType::Square);
+    let artist = ArtistFactory::create(ArtistType::Normal);
 
     while window.is_open() && !window.is_key_down(minifb::Key::Escape) {
         buffer.fill(WHITE);
@@ -371,58 +338,58 @@ fn main() {
             }
         }
 
-        draw_matrix(&mut buffer);
+        draw_matrix(&mut buffer, artist.as_ref());
 
         for node in &walls {
-            square_drawer.draw(
+            artist.draw(
                 &mut buffer,
-                DrawParams::Square {
+                &DrawType::Square(SquareParams {
                     x: node.ux(),
                     y: node.uy(),
                     color: BLACK,
-                },
+                }),
             );
         }
 
         for (x, y) in &start_points {
             let (x, y) = (*x as usize, *y as usize);
 
-            circle_drawer.draw(
+            artist.draw(
                 &mut buffer,
-                DrawParams::Circle {
+                &DrawType::Circle(CircleParams {
                     x: x,
                     y: y,
                     radius: 10,
                     color: RED,
-                },
+                }),
             );
         }
 
         for (x, y) in &end_points {
             let (x, y) = (*x as usize, *y as usize);
 
-            circle_drawer.draw(
+            artist.draw(
                 &mut buffer,
-                DrawParams::Circle {
+                &DrawType::Circle(CircleParams {
                     x: x,
                     y: y,
                     radius: 10,
                     color: ORANGE,
-                },
+                }),
             );
         }
 
         for line in &lines {
             for i in 1..line.len() {
-                line_drawer.draw(
+                artist.draw(
                     &mut buffer,
-                    DrawParams::Line {
+                    &DrawType::Line(LineParams {
                         x0: line[i - 1].0 * CELL_HEIGHT + ((WIDTH / ROWS) / 2),
                         y0: line[i - 1].1 * CELL_WIDTH + ((HEIGHT / COLUMNS) / 2),
                         x1: line[i].0 * CELL_HEIGHT + ((WIDTH / ROWS) / 2),
                         y1: line[i].1 * CELL_WIDTH + ((HEIGHT / COLUMNS) / 2),
                         color: BLACK,
-                    },
+                    }),
                 );
             }
         }
