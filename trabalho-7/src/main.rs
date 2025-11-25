@@ -167,6 +167,70 @@ impl PartialOrd for State {
     }
 }
 
+trait MovementStrategy {
+    fn get_neighbors(&self, node: Node, rows: usize, columns: usize) -> Vec<Node>;
+    fn name(&self) -> &str;
+}
+
+struct OrthogonalMovement;
+
+impl MovementStrategy for OrthogonalMovement {
+    fn get_neighbors(&self, node: Node, rows: usize, columns: usize) -> Vec<Node> {
+        // 4 directions: up, down, left, right
+        let deltas = [(1, 0), (-1, 0), (0, 1), (0, -1)];
+        let mut result = Vec::with_capacity(4);
+
+        for (dx, dy) in deltas {
+            let nx = node.x + dx;
+            let ny = node.y + dy;
+
+            if nx >= 0 && ny >= 0 && nx < columns as i32 && ny < rows as i32 {
+                result.push(Node { x: nx, y: ny });
+            }
+        }
+
+        result
+    }
+
+    fn name(&self) -> &str {
+        "Orthogonal"
+    }
+}
+
+struct DiagonalMovement;
+
+impl MovementStrategy for DiagonalMovement {
+    fn get_neighbors(&self, node: Node, rows: usize, columns: usize) -> Vec<Node> {
+        // 8 directions: includes diagonals
+        let deltas = [
+            (1, 0),
+            (-1, 0),
+            (0, 1),
+            (0, -1), // orthogonal
+            (1, 1),
+            (1, -1),
+            (-1, 1),
+            (-1, -1), // diagonal
+        ];
+        let mut result = Vec::with_capacity(8);
+
+        for (dx, dy) in deltas {
+            let nx = node.x + dx;
+            let ny = node.y + dy;
+
+            if nx >= 0 && ny >= 0 && nx < columns as i32 && ny < rows as i32 {
+                result.push(Node { x: nx, y: ny });
+            }
+        }
+
+        result
+    }
+
+    fn name(&self) -> &str {
+        "Diagonal"
+    }
+}
+
 fn heuristic(a: Node, b: Node) -> i32 {
     (a.x - b.x).abs() + (a.y - b.y).abs()
 }
@@ -221,7 +285,12 @@ fn neighbors(node: Node, walls: &HashSet<Node>) -> Vec<Node> {
     result
 }
 
-fn a_star(start: Node, goal: Node, walls: &HashSet<Node>) -> Option<Vec<Node>> {
+fn a_star(
+    start: Node,
+    goal: Node,
+    walls: &HashSet<Node>,
+    movement: &dyn MovementStrategy,
+) -> Option<Vec<Node>> {
     let mut open_set = BinaryHeap::new();
     let mut came_from: HashMap<Node, Node> = HashMap::new();
     let mut g_score: HashMap<Node, i32> = HashMap::new();
@@ -244,7 +313,12 @@ fn a_star(start: Node, goal: Node, walls: &HashSet<Node>) -> Option<Vec<Node>> {
             return Some(path);
         }
 
-        for neighbor in neighbors(position, walls) {
+        // Use the movement strategy instead of hardcoded neighbors
+        for neighbor in movement.get_neighbors(position, ROWS, COLUMNS) {
+            if walls.contains(&neighbor) {
+                continue;
+            }
+
             let tentative_g = g_score.get(&position).unwrap_or(&i32::MAX) + 1;
 
             if tentative_g < *g_score.get(&neighbor).unwrap_or(&i32::MAX) {
@@ -270,6 +344,7 @@ struct GameState {
     currect_step: Steps,
     walls: HashSet<Node>,
     lines: Vec<Vec<(usize, usize)>>,
+    movement_strategy: Box<dyn MovementStrategy>,
 }
 
 fn main() {
@@ -284,6 +359,7 @@ fn main() {
         currect_step: Steps::Obstacles,
         walls: HashSet::new(),
         lines: Vec::new(),
+        movement_strategy: Box::new(OrthogonalMovement),
     };
 
     game_loop(&mut window, &mut buffer, &mut game_state);
@@ -308,6 +384,15 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
             state.start_points.clear();
             state.end_points.clear();
             state.walls.clear();
+            state.lines.clear();
+        }
+
+        if window.is_key_pressed(Key::M, minifb::KeyRepeat::No) {
+            if state.movement_strategy.name() == "Orthogonal" {
+                state.movement_strategy = Box::new(DiagonalMovement);
+            } else {
+                state.movement_strategy = Box::new(OrthogonalMovement)
+            }
             state.lines.clear();
         }
 
@@ -340,7 +425,9 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
                         y: y.1 as i32,
                     };
 
-                    if let Some(path) = a_star(start, goal, &state.walls) {
+                    if let Some(path) =
+                        a_star(start, goal, &state.walls, state.movement_strategy.as_ref())
+                    {
                         let mut temp_vec: Vec<(usize, usize)> = Vec::new();
                         for p in path {
                             temp_vec.push((p.x as usize, p.y as usize));
