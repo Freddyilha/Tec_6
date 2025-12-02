@@ -317,9 +317,116 @@ struct GameState {
     end_points: Vec<Node>,
     currect_step: Steps,
     walls: HashSet<Node>,
-    lines: Vec<Vec<Node>>,
     movement_strategy: Box<dyn MovementStrategy>,
 }
+
+//------------ Command
+
+trait Command {
+    fn execute(&mut self, movement: &mut PathMovement);
+    fn undo(&mut self, movement: &mut PathMovement);
+}
+
+struct PathMovement {
+    steps: Vec<Vec<Node>>,
+}
+
+impl PathMovement {
+    fn new() -> Self {
+        PathMovement { steps: Vec::new() }
+    }
+
+    fn write(&mut self, step: &Vec<Node>) {
+        self.steps.push(step.to_vec());
+    }
+
+    fn delete(&mut self, count: usize) {
+        for _ in 0..count {
+            self.steps.pop();
+        }
+    }
+
+    fn get_steps(&self) -> &Vec<Vec<Node>> {
+        &self.steps
+    }
+}
+
+struct WriteCommand {
+    step: Vec<Node>,
+}
+
+impl WriteCommand {
+    fn new(step: Vec<Node>) -> Self {
+        WriteCommand { step }
+    }
+}
+
+impl Command for WriteCommand {
+    fn execute(&mut self, movement: &mut PathMovement) {
+        movement.write(&self.step);
+    }
+
+    fn undo(&mut self, movement: &mut PathMovement) {
+        movement.delete(1); // Delete one path (the Vec<Node> we just added)
+    }
+}
+
+struct DeleteCommand {
+    deleted_steps: Vec<Vec<Node>>,
+    count: usize,
+}
+
+impl DeleteCommand {
+    fn new(count: usize) -> Self {
+        DeleteCommand {
+            deleted_steps: Vec::new(),
+            count,
+        }
+    }
+}
+
+impl Command for DeleteCommand {
+    fn execute(&mut self, movement: &mut PathMovement) {
+        let steps = movement.get_steps();
+        let start = steps.len().saturating_sub(self.count);
+        for i in start..steps.len() {
+            let latest_step = steps[i].clone();
+            self.deleted_steps.push(latest_step);
+        }
+        movement.delete(self.count);
+    }
+
+    fn undo(&mut self, movement: &mut PathMovement) {
+        for step in &self.deleted_steps {
+            movement.write(step);
+        }
+    }
+}
+
+struct CommandHistory {
+    history: Vec<Box<dyn Command>>,
+}
+
+impl CommandHistory {
+    fn new() -> Self {
+        CommandHistory {
+            history: Vec::new(),
+        }
+    }
+
+    fn execute(&mut self, mut command: Box<dyn Command>, movement: &mut PathMovement) {
+        command.execute(movement);
+        self.history.push(command);
+    }
+
+    fn undo(&mut self, movement: &mut PathMovement) {
+        if let Some(mut command) = self.history.pop() {
+            command.undo(movement);
+        }
+    }
+}
+
+//------------ Command
 
 //------------ CoR
 trait InitHandler {
@@ -358,7 +465,6 @@ impl InitHandler for GameStateInitHandler {
             end_points: Vec::new(),
             currect_step: Steps::Obstacles,
             walls: HashSet::new(),
-            lines: Vec::new(),
             movement_strategy: Box::new(OrthogonalMovement),
         };
         context.game_state = Some(game_state);
@@ -397,6 +503,8 @@ fn main() {
 
 fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) {
     let artist = ArtistFactory::create(ArtistType::Normal);
+    let mut movement = PathMovement::new();
+    let mut history = CommandHistory::new();
 
     while window.is_open() && !window.is_key_down(minifb::Key::Escape) {
         buffer.fill(WHITE);
@@ -410,11 +518,18 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
             state.currect_step = Steps::Obstacles;
         }
 
+        if window.is_key_pressed(Key::N, minifb::KeyRepeat::No) {
+            history.undo(&mut movement);
+        }
+
+        if window.is_key_pressed(Key::B, minifb::KeyRepeat::No) {
+            history.execute(Box::new(DeleteCommand::new(1)), &mut movement);
+        }
+
         if window.is_key_pressed(Key::Q, minifb::KeyRepeat::No) {
             state.start_points.clear();
             state.end_points.clear();
             state.walls.clear();
-            state.lines.clear();
         }
 
         if window.is_key_pressed(Key::M, minifb::KeyRepeat::No) {
@@ -423,7 +538,6 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
             } else {
                 state.movement_strategy = Box::new(OrthogonalMovement)
             }
-            state.lines.clear();
         }
 
         if window.is_key_pressed(Key::R, minifb::KeyRepeat::No) {
@@ -447,7 +561,8 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
 
         if window.is_key_pressed(Key::A, minifb::KeyRepeat::No) {
             if state.currect_step == Steps::Start || state.currect_step == Steps::Obstacles {
-                state.lines.clear();
+                movement.steps.clear();
+                history.history.clear();
 
                 for (x, y) in state.start_points.iter().zip(state.end_points.iter()) {
                     let start = Node {
@@ -467,7 +582,7 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
                             temp_vec.push(p);
                         }
 
-                        state.lines.push(temp_vec);
+                        history.execute(Box::new(WriteCommand::new(temp_vec)), &mut movement);
                     } else {
                         println!("No path found — goal is blocked.");
                     }
@@ -512,12 +627,11 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
             );
         }
 
-        for line in &state.lines {
+        for line in &movement.steps {
             for i in 1..line.len() {
                 artist.draw(
                     buffer,
                     &DrawType::Line(LineParams {
-                        // x0: line[i - 1].x * CELL_HEIGHT as i32 + ((WIDTH / ROWS) / 2) as i32,
                         x0: line[i - 1].x * CELL_HEIGHT as i32 + ((WIDTH / ROWS) / 2) as i32,
                         y0: line[i - 1].y * CELL_WIDTH as i32 + ((HEIGHT / COLUMNS) / 2) as i32,
                         x1: line[i].x * CELL_HEIGHT as i32 + ((WIDTH / ROWS) / 2) as i32,
