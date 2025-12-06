@@ -3,6 +3,7 @@ use rand::Rng;
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::collections::{BinaryHeap, HashMap};
+use std::rc::Rc;
 
 const WIDTH: usize = 1000;
 const HEIGHT: usize = 1000;
@@ -145,6 +146,13 @@ impl Node {
     fn uy(&self) -> usize {
         self.y as usize
     }
+
+    fn fx(&self) -> f32 {
+        self.x as f32
+    }
+    fn fy(&self) -> f32 {
+        self.y as f32
+    }
 }
 
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -174,7 +182,6 @@ struct OrthogonalMovement;
 
 impl MovementStrategy for OrthogonalMovement {
     fn get_neighbors(&self, node: Node, rows: usize, columns: usize) -> Vec<Node> {
-        // 4 directions: up, down, left, right
         let deltas = [(1, 0), (-1, 0), (0, 1), (0, -1)];
         let mut result = Vec::with_capacity(4);
 
@@ -311,6 +318,8 @@ fn a_star(
     None
 }
 
+//------------ Command
+
 struct GameState {
     was_pressed: bool,
     start_points: Vec<Node>,
@@ -319,8 +328,6 @@ struct GameState {
     walls: HashSet<Node>,
     movement_strategy: Box<dyn MovementStrategy>,
 }
-
-//------------ Command
 
 trait Command {
     fn execute(&mut self, movement: &mut PathMovement);
@@ -367,7 +374,7 @@ impl Command for WriteCommand {
     }
 
     fn undo(&mut self, movement: &mut PathMovement) {
-        movement.delete(1); // Delete one path (the Vec<Node> we just added)
+        movement.delete(1);
     }
 }
 
@@ -474,6 +481,121 @@ impl InitHandler for GameStateInitHandler {
 
 //------------ CoR
 
+//------------ Observer
+
+#[derive(Debug, Clone)]
+struct Line {
+    start: Node,
+    end: Node,
+}
+
+#[derive(Debug, Clone)]
+struct CollisionEvent {
+    line1: Line,
+    line2: Line,
+    collision_point: Option<Node>,
+}
+
+trait CollisionObserver {
+    fn on_collision(&self, event: &CollisionEvent);
+}
+
+trait CollisionSubject {
+    fn register_observer(&mut self, observer: Rc<dyn CollisionObserver>);
+    fn remove_observer(&mut self, observer: Rc<dyn CollisionObserver>);
+    fn notify_observers(&self, event: &CollisionEvent);
+}
+
+struct CollisionDetector {
+    observers: Vec<Rc<dyn CollisionObserver>>,
+    lines: Vec<Line>,
+}
+
+impl CollisionDetector {
+    fn new() -> Self {
+        CollisionDetector {
+            observers: Vec::new(),
+            lines: Vec::new(),
+        }
+    }
+
+    fn add_line(&mut self, line: Line) {
+        for existing_line in &self.lines {
+            if let Some(collision_point) = self.check_collision(&line, existing_line) {
+                let event = CollisionEvent {
+                    line1: line.clone(),
+                    line2: existing_line.clone(),
+                    collision_point: Some(collision_point),
+                };
+                self.notify_observers(&event);
+            }
+        }
+        self.lines.push(line);
+    }
+
+    fn clear_lines(&mut self) {
+        self.lines.clear();
+    }
+
+    fn check_collision(&self, line1: &Line, line2: &Line) -> Option<Node> {
+        let p1x = line1.start.x as f32;
+        let p1y = line1.start.y as f32;
+        let p2x = line1.end.x as f32;
+        let p2y = line1.end.y as f32;
+        let p3x = line2.start.x as f32;
+        let p3y = line2.start.y as f32;
+        let p4x = line2.end.x as f32;
+        let p4y = line2.end.y as f32;
+
+        let denom = (p1x - p2x) * (p3y - p4y) - (p1y - p2y) * (p3x - p4x);
+
+        if denom.abs() < 0.01 {
+            return None;
+        }
+
+        let t = ((p1x - p3x) * (p3y - p4y) - (p1y - p3y) * (p3x - p4x)) / denom;
+        let u = -((p1x - p2x) * (p1y - p3y) - (p1y - p2y) * (p1x - p3x)) / denom;
+
+        if t >= 0.0 && t <= 1.0 && u >= 0.0 && u <= 1.0 {
+            let intersection = Node {
+                x: (p1x + t * (p2x - p1x)) as i32,
+                y: (p1y + t * (p2y - p1y)) as i32,
+            };
+            return Some(intersection);
+        }
+
+        None
+    }
+}
+
+impl CollisionSubject for CollisionDetector {
+    fn register_observer(&mut self, observer: Rc<dyn CollisionObserver>) {
+        self.observers.push(observer);
+    }
+
+    fn remove_observer(&mut self, observer: Rc<dyn CollisionObserver>) {
+        self.observers.retain(|obs| !Rc::ptr_eq(obs, &observer));
+    }
+
+    fn notify_observers(&self, event: &CollisionEvent) {
+        for observer in &self.observers {
+            observer.on_collision(event);
+        }
+    }
+}
+
+struct CollisionLogger;
+
+impl CollisionObserver for CollisionLogger {
+    fn on_collision(&self, event: &CollisionEvent) {
+        if let Some(point) = event.collision_point {
+            println!("🔴 Path collision detected at ({}, {})", point.x, point.y);
+        }
+    }
+}
+
+//------------ Observer
+
 fn main() {
     let mut handlers: Vec<Box<dyn InitHandler>> = vec![
         Box::new(WindowInitHandler),
@@ -505,6 +627,10 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
     let artist = ArtistFactory::create(ArtistType::Normal);
     let mut movement = PathMovement::new();
     let mut history = CommandHistory::new();
+
+    let mut collision_detector = CollisionDetector::new();
+    let logger = Rc::new(CollisionLogger);
+    collision_detector.register_observer(logger);
 
     while window.is_open() && !window.is_key_down(minifb::Key::Escape) {
         buffer.fill(WHITE);
@@ -563,6 +689,7 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
             if state.currect_step == Steps::Start || state.currect_step == Steps::Obstacles {
                 movement.steps.clear();
                 history.history.clear();
+                collision_detector.clear_lines();
 
                 for (x, y) in state.start_points.iter().zip(state.end_points.iter()) {
                     let start = Node {
@@ -580,6 +707,13 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
                         let mut temp_vec: Vec<Node> = Vec::new();
                         for p in path {
                             temp_vec.push(p);
+                        }
+
+                        for i in 1..temp_vec.len() {
+                            collision_detector.add_line(Line {
+                                start: temp_vec[i - 1],
+                                end: temp_vec[i],
+                            });
                         }
 
                         history.execute(Box::new(WriteCommand::new(temp_vec)), &mut movement);
