@@ -16,6 +16,19 @@ const ORANGE: u32 = 0x00FF963C;
 const CELL_WIDTH: usize = WIDTH / COLUMNS;
 const CELL_HEIGHT: usize = HEIGHT / ROWS;
 
+// Structs
+struct PixelArtist;
+struct ArtistFactory;
+struct WindowInitHandler;
+struct BufferInitHandler;
+struct GameStateInitHandler;
+struct CollisionLogger;
+
+#[derive(Debug)]
+struct OrthogonalMovement;
+#[derive(Debug)]
+struct DiagonalMovement;
+
 #[derive(Clone, Eq, PartialEq, Debug)]
 struct Agent {
     id: usize,
@@ -23,6 +36,7 @@ struct Agent {
     end_point: Option<Node>,
     current_point: Node,
     final_path: Option<Vec<Node>>,
+    current_path_index: usize,
 }
 
 struct LineParams {
@@ -46,9 +60,98 @@ struct CircleParams {
     pub color: u32,
 }
 
-struct PixelArtist;
-struct ArtistFactory;
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+struct Node {
+    x: i32,
+    y: i32,
+}
 
+#[derive(Copy, Clone, PartialEq, Eq)]
+struct State {
+    cost: i32,
+    position: Node,
+}
+
+struct GameState {
+    was_pressed: bool,
+    start_points: Vec<Node>,
+    end_points: Vec<Node>,
+    currect_step: Steps,
+    walls: HashSet<Node>,
+    movement_strategy: Box<dyn MovementStrategy>,
+}
+
+#[derive(Debug)]
+struct PathMovement {
+    steps: Vec<Vec<Node>>,
+}
+
+struct WriteCommand {
+    step: Vec<Node>,
+}
+
+struct DeleteCommand {
+    deleted_steps: Vec<Vec<Node>>,
+    count: usize,
+}
+
+struct CommandHistory {
+    history: Vec<Box<dyn Command>>,
+}
+
+struct InitContext {
+    window: Option<Window>,
+    buffer: Option<Vec<u32>>,
+    game_state: Option<GameState>,
+}
+
+#[derive(Debug, Clone)]
+struct Line {
+    start: Node,
+    end: Node,
+}
+
+struct CollisionEvent {
+    line1: Line,
+    line2: Line,
+    collision_point: Option<Node>,
+}
+
+struct CollisionDetector {
+    observers: Vec<Rc<dyn CollisionObserver>>,
+    lines: Vec<Line>,
+}
+
+// TRAITS
+trait Artist {
+    fn draw(&self, buffer: &mut [u32], item: &DrawType);
+}
+
+trait MovementStrategy {
+    fn get_neighbors(&self, node: Node, rows: usize, columns: usize) -> Vec<Node>;
+    fn name(&self) -> &str;
+}
+
+trait Command {
+    fn execute(&mut self, movement: &mut PathMovement);
+    fn undo(&mut self, movement: &mut PathMovement);
+}
+
+trait InitHandler {
+    fn initialize(&mut self, context: &mut InitContext) -> Result<(), String>;
+}
+
+trait CollisionObserver {
+    fn on_collision(&self, event: &CollisionEvent);
+}
+
+trait CollisionSubject {
+    fn register_observer(&mut self, observer: Rc<dyn CollisionObserver>);
+    fn remove_observer(&mut self, observer: Rc<dyn CollisionObserver>);
+    fn notify_observers(&self, event: &CollisionEvent);
+}
+
+// ENUMS
 enum DrawType {
     Line(LineParams),
     Square(SquareParams),
@@ -59,10 +162,14 @@ enum ArtistType {
     Normal,
 }
 
-trait Artist {
-    fn draw(&self, buffer: &mut [u32], item: &DrawType);
+#[derive(Eq, PartialEq)]
+enum Steps {
+    Obstacles,
+    Start,
+    End,
 }
 
+// IMPLEMENTATIONS
 impl Artist for PixelArtist {
     fn draw(&self, buffer: &mut [u32], item: &DrawType) {
         match item {
@@ -81,6 +188,282 @@ impl ArtistFactory {
     }
 }
 
+impl Node {
+    fn ux(&self) -> usize {
+        self.x as usize
+    }
+    fn uy(&self) -> usize {
+        self.y as usize
+    }
+
+    fn fx(&self) -> f32 {
+        self.x as f32
+    }
+    fn fy(&self) -> f32 {
+        self.y as f32
+    }
+}
+
+impl Ord for State {
+    fn cmp(&self, other: &Self) -> Ordering {
+        other.cost.cmp(&self.cost)
+    }
+}
+
+impl PartialOrd for State {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl MovementStrategy for OrthogonalMovement {
+    fn get_neighbors(&self, node: Node, rows: usize, columns: usize) -> Vec<Node> {
+        let deltas = [(1, 0), (-1, 0), (0, 1), (0, -1)];
+        let mut result = Vec::with_capacity(4);
+
+        for (dx, dy) in deltas {
+            let nx = node.x + dx;
+            let ny = node.y + dy;
+
+            if nx >= 0 && ny >= 0 && nx < columns as i32 && ny < rows as i32 {
+                result.push(Node { x: nx, y: ny });
+            }
+        }
+
+        result
+    }
+
+    fn name(&self) -> &str {
+        "Orthogonal"
+    }
+}
+
+impl MovementStrategy for DiagonalMovement {
+    fn get_neighbors(&self, node: Node, rows: usize, columns: usize) -> Vec<Node> {
+        let deltas = [
+            (1, 0),
+            (-1, 0),
+            (0, 1),
+            (0, -1),
+            (1, 1),
+            (1, -1),
+            (-1, 1),
+            (-1, -1),
+        ];
+        let mut result = Vec::with_capacity(8);
+
+        for (dx, dy) in deltas {
+            let nx = node.x + dx;
+            let ny = node.y + dy;
+
+            if nx >= 0 && ny >= 0 && nx < columns as i32 && ny < rows as i32 {
+                result.push(Node { x: nx, y: ny });
+            }
+        }
+
+        result
+    }
+
+    fn name(&self) -> &str {
+        "Diagonal"
+    }
+}
+
+impl PathMovement {
+    fn new() -> Self {
+        PathMovement { steps: Vec::new() }
+    }
+
+    fn write(&mut self, step: &Vec<Node>) {
+        self.steps.push(step.to_vec());
+    }
+
+    fn delete(&mut self, count: usize) {
+        for _ in 0..count {
+            self.steps.pop();
+        }
+    }
+
+    fn get_steps(&self) -> &Vec<Vec<Node>> {
+        &self.steps
+    }
+}
+
+impl WriteCommand {
+    fn new(step: Vec<Node>) -> Self {
+        WriteCommand { step }
+    }
+}
+
+impl Command for WriteCommand {
+    fn execute(&mut self, movement: &mut PathMovement) {
+        movement.write(&self.step);
+    }
+
+    fn undo(&mut self, movement: &mut PathMovement) {
+        movement.delete(1);
+    }
+}
+
+impl DeleteCommand {
+    fn new(count: usize) -> Self {
+        DeleteCommand {
+            deleted_steps: Vec::new(),
+            count,
+        }
+    }
+}
+
+impl Command for DeleteCommand {
+    fn execute(&mut self, movement: &mut PathMovement) {
+        let steps = movement.get_steps();
+        let start = steps.len().saturating_sub(self.count);
+        for i in start..steps.len() {
+            let latest_step = steps[i].clone();
+            self.deleted_steps.push(latest_step);
+        }
+        movement.delete(self.count);
+    }
+
+    fn undo(&mut self, movement: &mut PathMovement) {
+        for step in &self.deleted_steps {
+            movement.write(step);
+        }
+    }
+}
+
+impl CommandHistory {
+    fn new() -> Self {
+        CommandHistory {
+            history: Vec::new(),
+        }
+    }
+
+    fn execute(&mut self, mut command: Box<dyn Command>, movement: &mut PathMovement) {
+        command.execute(movement);
+        self.history.push(command);
+    }
+
+    fn undo(&mut self, movement: &mut PathMovement) {
+        if let Some(mut command) = self.history.pop() {
+            command.undo(movement);
+        }
+    }
+}
+
+impl InitHandler for WindowInitHandler {
+    fn initialize(&mut self, context: &mut InitContext) -> Result<(), String> {
+        let window = Window::new("Navigation grid", WIDTH, HEIGHT, WindowOptions::default())
+            .map_err(|e| format!("Failed to create window: {:?}", e))?;
+        context.window = Some(window);
+        Ok(())
+    }
+}
+
+impl InitHandler for BufferInitHandler {
+    fn initialize(&mut self, context: &mut InitContext) -> Result<(), String> {
+        context.buffer = Some(vec![0; WIDTH * HEIGHT]);
+        Ok(())
+    }
+}
+
+impl InitHandler for GameStateInitHandler {
+    fn initialize(&mut self, context: &mut InitContext) -> Result<(), String> {
+        let game_state = GameState {
+            was_pressed: false,
+            start_points: Vec::new(),
+            end_points: Vec::new(),
+            currect_step: Steps::Obstacles,
+            walls: HashSet::new(),
+            movement_strategy: Box::new(OrthogonalMovement),
+        };
+        context.game_state = Some(game_state);
+        Ok(())
+    }
+}
+
+impl CollisionDetector {
+    fn new() -> Self {
+        CollisionDetector {
+            observers: Vec::new(),
+            lines: Vec::new(),
+        }
+    }
+
+    fn add_line(&mut self, line: Line) {
+        for existing_line in &self.lines {
+            if let Some(collision_point) = self.check_collision(&line, existing_line) {
+                let event = CollisionEvent {
+                    line1: line.clone(),
+                    line2: existing_line.clone(),
+                    collision_point: Some(collision_point),
+                };
+                self.notify_observers(&event);
+            }
+        }
+        self.lines.push(line);
+    }
+
+    fn clear_lines(&mut self) {
+        self.lines.clear();
+    }
+
+    fn check_collision(&self, line1: &Line, line2: &Line) -> Option<Node> {
+        let p1x = line1.start.x as f32;
+        let p1y = line1.start.y as f32;
+        let p2x = line1.end.x as f32;
+        let p2y = line1.end.y as f32;
+        let p3x = line2.start.x as f32;
+        let p3y = line2.start.y as f32;
+        let p4x = line2.end.x as f32;
+        let p4y = line2.end.y as f32;
+
+        let denom = (p1x - p2x) * (p3y - p4y) - (p1y - p2y) * (p3x - p4x);
+
+        if denom.abs() < 0.01 {
+            return None;
+        }
+
+        let t = ((p1x - p3x) * (p3y - p4y) - (p1y - p3y) * (p3x - p4x)) / denom;
+        let u = -((p1x - p2x) * (p1y - p3y) - (p1y - p2y) * (p1x - p3x)) / denom;
+
+        if t >= 0.0 && t <= 1.0 && u >= 0.0 && u <= 1.0 {
+            let intersection = Node {
+                x: (p1x + t * (p2x - p1x)) as i32,
+                y: (p1y + t * (p2y - p1y)) as i32,
+            };
+            return Some(intersection);
+        }
+
+        None
+    }
+}
+
+impl CollisionSubject for CollisionDetector {
+    fn register_observer(&mut self, observer: Rc<dyn CollisionObserver>) {
+        self.observers.push(observer);
+    }
+
+    fn remove_observer(&mut self, observer: Rc<dyn CollisionObserver>) {
+        self.observers.retain(|obs| !Rc::ptr_eq(obs, &observer));
+    }
+
+    fn notify_observers(&self, event: &CollisionEvent) {
+        for observer in &self.observers {
+            observer.on_collision(event);
+        }
+    }
+}
+
+impl CollisionObserver for CollisionLogger {
+    fn on_collision(&self, event: &CollisionEvent) {
+        if let Some(point) = event.collision_point {
+            println!("Path collision detected at ({}, {})", point.x, point.y);
+        }
+    }
+}
+
+// FUNCTIONS
 fn draw_line(buffer: &mut [u32], p: &LineParams) {
     let (mut x0, mut y0, x1, y1) = (p.x0 as i32, p.y0 as i32, p.x1 as i32, p.y1 as i32);
     let dx = (x1 - x0).abs();
@@ -132,117 +515,6 @@ fn draw_square(buffer: &mut [u32], p: &SquareParams) {
         let row_start = top_left + (i * WIDTH);
         let row_end = row_start + CELL_HEIGHT;
         buffer[row_start..row_end].fill(p.color);
-    }
-}
-
-#[derive(Eq, PartialEq)]
-enum Steps {
-    Obstacles,
-    Start,
-    End,
-}
-
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
-struct Node {
-    x: i32,
-    y: i32,
-}
-
-impl Node {
-    fn ux(&self) -> usize {
-        self.x as usize
-    }
-    fn uy(&self) -> usize {
-        self.y as usize
-    }
-
-    fn fx(&self) -> f32 {
-        self.x as f32
-    }
-    fn fy(&self) -> f32 {
-        self.y as f32
-    }
-}
-
-#[derive(Copy, Clone, PartialEq, Eq)]
-struct State {
-    cost: i32,
-    position: Node,
-}
-
-impl Ord for State {
-    fn cmp(&self, other: &Self) -> Ordering {
-        other.cost.cmp(&self.cost)
-    }
-}
-
-impl PartialOrd for State {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-trait MovementStrategy {
-    fn get_neighbors(&self, node: Node, rows: usize, columns: usize) -> Vec<Node>;
-    fn name(&self) -> &str;
-}
-
-#[derive(Debug)]
-struct OrthogonalMovement;
-
-impl MovementStrategy for OrthogonalMovement {
-    fn get_neighbors(&self, node: Node, rows: usize, columns: usize) -> Vec<Node> {
-        let deltas = [(1, 0), (-1, 0), (0, 1), (0, -1)];
-        let mut result = Vec::with_capacity(4);
-
-        for (dx, dy) in deltas {
-            let nx = node.x + dx;
-            let ny = node.y + dy;
-
-            if nx >= 0 && ny >= 0 && nx < columns as i32 && ny < rows as i32 {
-                result.push(Node { x: nx, y: ny });
-            }
-        }
-
-        result
-    }
-
-    fn name(&self) -> &str {
-        "Orthogonal"
-    }
-}
-
-#[derive(Debug)]
-struct DiagonalMovement;
-
-impl MovementStrategy for DiagonalMovement {
-    fn get_neighbors(&self, node: Node, rows: usize, columns: usize) -> Vec<Node> {
-        let deltas = [
-            (1, 0),
-            (-1, 0),
-            (0, 1),
-            (0, -1),
-            (1, 1),
-            (1, -1),
-            (-1, 1),
-            (-1, -1),
-        ];
-        let mut result = Vec::with_capacity(8);
-
-        for (dx, dy) in deltas {
-            let nx = node.x + dx;
-            let ny = node.y + dy;
-
-            if nx >= 0 && ny >= 0 && nx < columns as i32 && ny < rows as i32 {
-                result.push(Node { x: nx, y: ny });
-            }
-        }
-
-        result
-    }
-
-    fn name(&self) -> &str {
-        "Diagonal"
     }
 }
 
@@ -329,311 +601,6 @@ fn a_star(
     None
 }
 
-//------------ Command
-
-struct GameState {
-    was_pressed: bool,
-    start_points: Vec<Node>,
-    end_points: Vec<Node>,
-    currect_step: Steps,
-    walls: HashSet<Node>,
-    movement_strategy: Box<dyn MovementStrategy>,
-}
-
-trait Command {
-    fn execute(&mut self, movement: &mut PathMovement);
-    fn undo(&mut self, movement: &mut PathMovement);
-}
-
-#[derive(Debug)]
-struct PathMovement {
-    steps: Vec<Vec<Node>>,
-}
-
-impl PathMovement {
-    fn new() -> Self {
-        PathMovement { steps: Vec::new() }
-    }
-
-    fn write(&mut self, step: &Vec<Node>) {
-        self.steps.push(step.to_vec());
-    }
-
-    fn delete(&mut self, count: usize) {
-        for _ in 0..count {
-            self.steps.pop();
-        }
-    }
-
-    fn get_steps(&self) -> &Vec<Vec<Node>> {
-        &self.steps
-    }
-}
-
-struct WriteCommand {
-    step: Vec<Node>,
-}
-
-impl WriteCommand {
-    fn new(step: Vec<Node>) -> Self {
-        WriteCommand { step }
-    }
-}
-
-impl Command for WriteCommand {
-    fn execute(&mut self, movement: &mut PathMovement) {
-        movement.write(&self.step);
-    }
-
-    fn undo(&mut self, movement: &mut PathMovement) {
-        movement.delete(1);
-    }
-}
-
-struct DeleteCommand {
-    deleted_steps: Vec<Vec<Node>>,
-    count: usize,
-}
-
-impl DeleteCommand {
-    fn new(count: usize) -> Self {
-        DeleteCommand {
-            deleted_steps: Vec::new(),
-            count,
-        }
-    }
-}
-
-impl Command for DeleteCommand {
-    fn execute(&mut self, movement: &mut PathMovement) {
-        let steps = movement.get_steps();
-        let start = steps.len().saturating_sub(self.count);
-        for i in start..steps.len() {
-            let latest_step = steps[i].clone();
-            self.deleted_steps.push(latest_step);
-        }
-        movement.delete(self.count);
-    }
-
-    fn undo(&mut self, movement: &mut PathMovement) {
-        for step in &self.deleted_steps {
-            movement.write(step);
-        }
-    }
-}
-
-struct CommandHistory {
-    history: Vec<Box<dyn Command>>,
-}
-
-impl CommandHistory {
-    fn new() -> Self {
-        CommandHistory {
-            history: Vec::new(),
-        }
-    }
-
-    fn execute(&mut self, mut command: Box<dyn Command>, movement: &mut PathMovement) {
-        command.execute(movement);
-        self.history.push(command);
-    }
-
-    fn undo(&mut self, movement: &mut PathMovement) {
-        if let Some(mut command) = self.history.pop() {
-            command.undo(movement);
-        }
-    }
-}
-
-//------------ Command
-
-//------------ CoR
-trait InitHandler {
-    fn initialize(&mut self, context: &mut InitContext) -> Result<(), String>;
-}
-struct InitContext {
-    window: Option<Window>,
-    buffer: Option<Vec<u32>>,
-    game_state: Option<GameState>,
-}
-
-struct WindowInitHandler;
-impl InitHandler for WindowInitHandler {
-    fn initialize(&mut self, context: &mut InitContext) -> Result<(), String> {
-        let window = Window::new("Navigation grid", WIDTH, HEIGHT, WindowOptions::default())
-            .map_err(|e| format!("Failed to create window: {:?}", e))?;
-        context.window = Some(window);
-        Ok(())
-    }
-}
-
-struct BufferInitHandler;
-impl InitHandler for BufferInitHandler {
-    fn initialize(&mut self, context: &mut InitContext) -> Result<(), String> {
-        context.buffer = Some(vec![0; WIDTH * HEIGHT]);
-        Ok(())
-    }
-}
-
-struct GameStateInitHandler;
-impl InitHandler for GameStateInitHandler {
-    fn initialize(&mut self, context: &mut InitContext) -> Result<(), String> {
-        let game_state = GameState {
-            was_pressed: false,
-            start_points: Vec::new(),
-            end_points: Vec::new(),
-            currect_step: Steps::Obstacles,
-            walls: HashSet::new(),
-            movement_strategy: Box::new(OrthogonalMovement),
-        };
-        context.game_state = Some(game_state);
-        Ok(())
-    }
-}
-
-//------------ CoR
-
-//------------ Observer
-
-#[derive(Debug, Clone)]
-struct Line {
-    start: Node,
-    end: Node,
-}
-
-struct CollisionEvent {
-    line1: Line,
-    line2: Line,
-    collision_point: Option<Node>,
-}
-
-trait CollisionObserver {
-    fn on_collision(&self, event: &CollisionEvent);
-}
-
-trait CollisionSubject {
-    fn register_observer(&mut self, observer: Rc<dyn CollisionObserver>);
-    fn remove_observer(&mut self, observer: Rc<dyn CollisionObserver>);
-    fn notify_observers(&self, event: &CollisionEvent);
-}
-
-struct CollisionDetector {
-    observers: Vec<Rc<dyn CollisionObserver>>,
-    lines: Vec<Line>,
-}
-
-impl CollisionDetector {
-    fn new() -> Self {
-        CollisionDetector {
-            observers: Vec::new(),
-            lines: Vec::new(),
-        }
-    }
-
-    fn add_line(&mut self, line: Line) {
-        for existing_line in &self.lines {
-            if let Some(collision_point) = self.check_collision(&line, existing_line) {
-                let event = CollisionEvent {
-                    line1: line.clone(),
-                    line2: existing_line.clone(),
-                    collision_point: Some(collision_point),
-                };
-                self.notify_observers(&event);
-            }
-        }
-        self.lines.push(line);
-    }
-
-    fn clear_lines(&mut self) {
-        self.lines.clear();
-    }
-
-    fn check_collision(&self, line1: &Line, line2: &Line) -> Option<Node> {
-        let p1x = line1.start.x as f32;
-        let p1y = line1.start.y as f32;
-        let p2x = line1.end.x as f32;
-        let p2y = line1.end.y as f32;
-        let p3x = line2.start.x as f32;
-        let p3y = line2.start.y as f32;
-        let p4x = line2.end.x as f32;
-        let p4y = line2.end.y as f32;
-
-        let denom = (p1x - p2x) * (p3y - p4y) - (p1y - p2y) * (p3x - p4x);
-
-        if denom.abs() < 0.01 {
-            return None;
-        }
-
-        let t = ((p1x - p3x) * (p3y - p4y) - (p1y - p3y) * (p3x - p4x)) / denom;
-        let u = -((p1x - p2x) * (p1y - p3y) - (p1y - p2y) * (p1x - p3x)) / denom;
-
-        if t >= 0.0 && t <= 1.0 && u >= 0.0 && u <= 1.0 {
-            let intersection = Node {
-                x: (p1x + t * (p2x - p1x)) as i32,
-                y: (p1y + t * (p2y - p1y)) as i32,
-            };
-            return Some(intersection);
-        }
-
-        None
-    }
-}
-
-impl CollisionSubject for CollisionDetector {
-    fn register_observer(&mut self, observer: Rc<dyn CollisionObserver>) {
-        self.observers.push(observer);
-    }
-
-    fn remove_observer(&mut self, observer: Rc<dyn CollisionObserver>) {
-        self.observers.retain(|obs| !Rc::ptr_eq(obs, &observer));
-    }
-
-    fn notify_observers(&self, event: &CollisionEvent) {
-        for observer in &self.observers {
-            observer.on_collision(event);
-        }
-    }
-}
-
-struct CollisionLogger;
-
-impl CollisionObserver for CollisionLogger {
-    fn on_collision(&self, event: &CollisionEvent) {
-        if let Some(point) = event.collision_point {
-            println!("Path collision detected at ({}, {})", point.x, point.y);
-        }
-    }
-}
-
-//------------ Observer
-
-fn main() {
-    let mut handlers: Vec<Box<dyn InitHandler>> = vec![
-        Box::new(WindowInitHandler),
-        Box::new(BufferInitHandler),
-        Box::new(GameStateInitHandler),
-    ];
-
-    let mut context = InitContext {
-        window: None,
-        buffer: None,
-        game_state: None,
-    };
-
-    for handler in handlers.iter_mut() {
-        if let Err(e) = handler.initialize(&mut context) {
-            eprintln!("Initialization failed: {}", e);
-            return;
-        }
-    }
-
-    let mut window = context.window.unwrap();
-    let mut buffer = context.buffer.unwrap();
-    let mut game_state = context.game_state.unwrap();
-
-    game_loop(&mut window, &mut buffer, &mut game_state);
-}
-
 fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) {
     let artist = ArtistFactory::create(ArtistType::Normal);
     let mut movement = PathMovement::new();
@@ -666,10 +633,19 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
             history.execute(Box::new(DeleteCommand::new(1)), &mut movement);
         }
 
-        if window.is_key_pressed(Key::Q, minifb::KeyRepeat::No) {
-            state.start_points.clear();
-            state.end_points.clear();
-            state.walls.clear();
+        if window.is_key_pressed(Key::W, minifb::KeyRepeat::No) {
+            for agent in &mut agents {
+                if let Some(path) = &agent.final_path {
+                    if agent.current_path_index + 1 < path.len() {
+                        agent.current_path_index += 1;
+                        agent.current_point = path[agent.current_path_index].clone();
+                    }
+                }
+            }
+        }
+
+        if window.is_key_pressed(Key::N, minifb::KeyRepeat::No) {
+            history.undo(&mut movement);
         }
 
         if window.is_key_pressed(Key::M, minifb::KeyRepeat::No) {
@@ -701,6 +677,7 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
                     end_point: Some(temp_end),
                     current_point: temp_start,
                     final_path: None,
+                    current_path_index: 0,
                 });
             }
         }
@@ -813,6 +790,7 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
                                 end_point: None,
                                 current_point: temp_node,
                                 final_path: None,
+                                current_path_index: 0,
                             });
                             state.currect_step = Steps::End;
                         }
@@ -830,4 +808,31 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
         state.was_pressed = is_pressed;
         window.update_with_buffer(&buffer, WIDTH, HEIGHT).unwrap();
     }
+}
+
+fn main() {
+    let mut handlers: Vec<Box<dyn InitHandler>> = vec![
+        Box::new(WindowInitHandler),
+        Box::new(BufferInitHandler),
+        Box::new(GameStateInitHandler),
+    ];
+
+    let mut context = InitContext {
+        window: None,
+        buffer: None,
+        game_state: None,
+    };
+
+    for handler in handlers.iter_mut() {
+        if let Err(e) = handler.initialize(&mut context) {
+            eprintln!("Initialization failed: {}", e);
+            return;
+        }
+    }
+
+    let mut window = context.window.unwrap();
+    let mut buffer = context.buffer.unwrap();
+    let mut game_state = context.game_state.unwrap();
+
+    game_loop(&mut window, &mut buffer, &mut game_state);
 }
