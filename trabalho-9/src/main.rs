@@ -746,6 +746,7 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
         }
 
         for agent in &agents {
+            // Draw current position of the agent
             artist.draw(
                 buffer,
                 &DrawType::Circle(CircleParams {
@@ -755,9 +756,8 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
                     color: RED,
                 }),
             );
-        }
 
-        for agent in &agents {
+            // Draw destination position of the agent
             if let Some(point) = &agent.end_point {
                 artist.draw(
                     buffer,
@@ -769,9 +769,8 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
                     }),
                 );
             }
-        }
 
-        for agent in &agents {
+            // Draw path position of the agent
             if let Some(path) = &agent.final_path {
                 for i in 1..path.len() {
                     artist.draw(
