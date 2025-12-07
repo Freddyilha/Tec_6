@@ -11,6 +11,7 @@ const ROWS: usize = 20;
 const COLUMNS: usize = 20;
 const WHITE: u32 = 0x00FFFFFF;
 const RED: u32 = 0x00FF0000;
+const PALE_RED: u32 = 0x00FFF0F0;
 const BLACK: u32 = 0x00080808;
 const ORANGE: u32 = 0x00FF963C;
 const CELL_WIDTH: usize = WIDTH / COLUMNS;
@@ -613,6 +614,17 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
 
     let mut print_once = false;
 
+    let deltas = [
+        (1, 0),
+        (-1, 0),
+        (0, 1),
+        (0, -1),
+        (1, 1),
+        (1, -1),
+        (-1, 1),
+        (-1, -1),
+    ];
+
     while window.is_open() && !window.is_key_down(minifb::Key::Escape) {
         buffer.fill(WHITE);
         let is_pressed = window.get_mouse_down(MouseButton::Left);
@@ -683,10 +695,10 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
         }
 
         if window.is_key_pressed(Key::A, minifb::KeyRepeat::No) {
-            if !print_once {
-                dbg!(&agents);
-                print_once = true;
-            }
+            // if !print_once {
+            //     dbg!(&agents);
+            //     print_once = true;
+            // }
             if state.currect_step == Steps::Start || state.currect_step == Steps::Obstacles {
                 movement.steps.clear();
                 history.history.clear();
@@ -723,6 +735,19 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
         }
 
         for agent in &agents {
+            // Draw destination position of the agent
+            if let Some(point) = &agent.end_point {
+                artist.draw(
+                    buffer,
+                    &DrawType::Circle(CircleParams {
+                        x: point.ux(),
+                        y: point.uy(),
+                        radius: 10,
+                        color: ORANGE,
+                    }),
+                );
+            }
+
             // Draw current position of the agent
             artist.draw(
                 buffer,
@@ -734,15 +759,15 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
                 }),
             );
 
-            // Draw destination position of the agent
-            if let Some(point) = &agent.end_point {
+            for (dx, dy) in deltas {
+                // Draw the radius around current position of the agent
                 artist.draw(
                     buffer,
                     &DrawType::Circle(CircleParams {
-                        x: point.ux(),
-                        y: point.uy(),
+                        x: (agent.current_point.x + dx) as usize,
+                        y: (agent.current_point.y + dy) as usize,
                         radius: 10,
-                        color: ORANGE,
+                        color: PALE_RED,
                     }),
                 );
             }
