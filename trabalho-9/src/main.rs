@@ -38,6 +38,13 @@ struct Agent {
     current_point: Node,
     final_path: Option<Vec<Node>>,
     current_path_index: usize,
+    collision_radius: Vec<Node>,
+}
+
+#[derive(Debug, Clone)]
+enum CollisionType {
+    Proximity,
+    Direct,
 }
 
 struct LineParams {
@@ -113,14 +120,14 @@ struct Line {
 }
 
 struct CollisionEvent {
-    line1: Line,
-    line2: Line,
-    collision_point: Option<Node>,
+    agent1_id: usize,
+    agent2_id: usize,
+    collision_type: CollisionType,
+    collision_point: Node,
 }
 
 struct CollisionDetector {
     observers: Vec<Rc<dyn CollisionObserver>>,
-    lines: Vec<Line>,
 }
 
 // TRAITS
@@ -387,53 +394,76 @@ impl CollisionDetector {
     fn new() -> Self {
         CollisionDetector {
             observers: Vec::new(),
-            lines: Vec::new(),
         }
     }
 
-    fn add_line(&mut self, line: Line) {
-        for existing_line in &self.lines {
-            if let Some(collision_point) = self.check_collision(&line, existing_line) {
-                let event = CollisionEvent {
-                    line1: line.clone(),
-                    line2: existing_line.clone(),
-                    collision_point: Some(collision_point),
-                };
-                self.notify_observers(&event);
+    fn check_agents(&mut self, agents: &[Agent]) {
+        for i in 0..agents.len() {
+            for j in (i + 1)..agents.len() {
+                let agent1 = &agents[i];
+                let agent2 = &agents[j];
+
+                if agent1.current_point == agent2.current_point {
+                    let event = CollisionEvent {
+                        agent1_id: agent1.id,
+                        agent2_id: agent2.id,
+                        collision_type: CollisionType::Direct,
+                        collision_point: agent1.current_point,
+                    };
+                    self.notify_observers(&event);
+                } else if self.check_proximity_collision(agent1, agent2) {
+                    if let Some(collision_point) = self.find_collision_point(agent1, agent2) {
+                        let event = CollisionEvent {
+                            agent1_id: agent1.id,
+                            agent2_id: agent2.id,
+                            collision_type: CollisionType::Proximity,
+                            collision_point,
+                        };
+                        self.notify_observers(&event);
+                    }
+                }
             }
         }
-        self.lines.push(line);
     }
 
-    fn clear_lines(&mut self) {
-        self.lines.clear();
-    }
+    fn check_proximity_collision(&self, agent1: &Agent, agent2: &Agent) -> bool {
+        for radius1 in &agent1.collision_radius {
+            for radius2 in &agent2.collision_radius {
+                if radius1 == radius2 {
+                    return true;
+                }
+            }
 
-    fn check_collision(&self, line1: &Line, line2: &Line) -> Option<Node> {
-        let p1x = line1.start.x as f32;
-        let p1y = line1.start.y as f32;
-        let p2x = line1.end.x as f32;
-        let p2y = line1.end.y as f32;
-        let p3x = line2.start.x as f32;
-        let p3y = line2.start.y as f32;
-        let p4x = line2.end.x as f32;
-        let p4y = line2.end.y as f32;
-
-        let denom = (p1x - p2x) * (p3y - p4y) - (p1y - p2y) * (p3x - p4x);
-
-        if denom.abs() < 0.01 {
-            return None;
+            if *radius1 == agent2.current_point {
+                return true;
+            }
         }
 
-        let t = ((p1x - p3x) * (p3y - p4y) - (p1y - p3y) * (p3x - p4x)) / denom;
-        let u = -((p1x - p2x) * (p1y - p3y) - (p1y - p2y) * (p1x - p3x)) / denom;
+        for radius2 in &agent2.collision_radius {
+            if *radius2 == agent1.current_point {
+                return true;
+            }
+        }
 
-        if t >= 0.0 && t <= 1.0 && u >= 0.0 && u <= 1.0 {
-            let intersection = Node {
-                x: (p1x + t * (p2x - p1x)) as i32,
-                y: (p1y + t * (p2y - p1y)) as i32,
-            };
-            return Some(intersection);
+        false
+    }
+
+    fn find_collision_point(&self, agent1: &Agent, agent2: &Agent) -> Option<Node> {
+        for radius1 in &agent1.collision_radius {
+            for radius2 in &agent2.collision_radius {
+                if radius1 == radius2 {
+                    return Some(*radius1);
+                }
+            }
+            if *radius1 == agent2.current_point {
+                return Some(*radius1);
+            }
+        }
+
+        for radius2 in &agent2.collision_radius {
+            if *radius2 == agent1.current_point {
+                return Some(*radius2);
+            }
         }
 
         None
@@ -458,9 +488,51 @@ impl CollisionSubject for CollisionDetector {
 
 impl CollisionObserver for CollisionLogger {
     fn on_collision(&self, event: &CollisionEvent) {
-        if let Some(point) = event.collision_point {
-            println!("Path collision detected at ({}, {})", point.x, point.y);
+        match event.collision_type {
+            CollisionType::Direct => {
+                println!(
+                    "Colisão entre agentes {} e {} na posição: ({}, {})",
+                    event.agent1_id,
+                    event.agent2_id,
+                    event.collision_point.x,
+                    event.collision_point.y
+                );
+            }
+            CollisionType::Proximity => {
+                println!(
+                    "Perigo de colisão entre agentes {} e {} na posição: ({}, {})",
+                    event.agent1_id,
+                    event.agent2_id,
+                    event.collision_point.x,
+                    event.collision_point.y
+                );
+            }
         }
+    }
+}
+
+impl Agent {
+    fn calculate_radius(&mut self) -> Vec<Node> {
+        let deltas = [
+            (1, 0),
+            (-1, 0),
+            (0, 1),
+            (0, -1),
+            (1, 1),
+            (1, -1),
+            (-1, 1),
+            (-1, -1),
+        ];
+
+        let mut temp_radius: Vec<Node> = Vec::with_capacity(8);
+        for (dx, dy) in deltas {
+            temp_radius.push(Node {
+                x: (self.current_point.x + dx),
+                y: (self.current_point.y + dy),
+            });
+        }
+
+        temp_radius
     }
 }
 
@@ -612,19 +684,6 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
     let logger = Rc::new(CollisionLogger);
     collision_detector.register_observer(logger);
 
-    let mut print_once = false;
-
-    let deltas = [
-        (1, 0),
-        (-1, 0),
-        (0, 1),
-        (0, -1),
-        (1, 1),
-        (1, -1),
-        (-1, 1),
-        (-1, -1),
-    ];
-
     while window.is_open() && !window.is_key_down(minifb::Key::Escape) {
         buffer.fill(WHITE);
         let is_pressed = window.get_mouse_down(MouseButton::Left);
@@ -651,9 +710,11 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
                     if agent.current_path_index + 1 < path.len() {
                         agent.current_path_index += 1;
                         agent.current_point = path[agent.current_path_index].clone();
+                        agent.collision_radius = agent.calculate_radius();
                     }
                 }
             }
+            collision_detector.check_agents(&agents);
         }
 
         if window.is_key_pressed(Key::N, minifb::KeyRepeat::No) {
@@ -690,19 +751,15 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
                     current_point: temp_start,
                     final_path: None,
                     current_path_index: 0,
+                    collision_radius: Vec::with_capacity(8),
                 });
             }
         }
 
         if window.is_key_pressed(Key::A, minifb::KeyRepeat::No) {
-            // if !print_once {
-            //     dbg!(&agents);
-            //     print_once = true;
-            // }
             if state.currect_step == Steps::Start || state.currect_step == Steps::Obstacles {
                 movement.steps.clear();
                 history.history.clear();
-                collision_detector.clear_lines();
 
                 for agent in &mut agents {
                     if let Some(path) = a_star(
@@ -713,7 +770,9 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
                     ) {
                         agent.final_path = Some(path);
 
-                        // history.execute(Box::new(WriteCommand::new(temp_vec)), &mut movement);
+                        agent.current_point = agent.start_point;
+                        agent.current_path_index = 0;
+                        agent.collision_radius = agent.calculate_radius();
                     } else {
                         println!("No path found — goal is blocked.");
                     }
@@ -759,13 +818,13 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
                 }),
             );
 
-            for (dx, dy) in deltas {
+            for radius in &agent.collision_radius {
                 // Draw the radius around current position of the agent
                 artist.draw(
                     buffer,
                     &DrawType::Circle(CircleParams {
-                        x: (agent.current_point.x + dx) as usize,
-                        y: (agent.current_point.y + dy) as usize,
+                        x: radius.x as usize,
+                        y: radius.y as usize,
                         radius: 10,
                         color: PALE_RED,
                     }),
@@ -816,13 +875,16 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
                                 current_point: temp_node,
                                 final_path: None,
                                 current_path_index: 0,
+                                collision_radius: Vec::with_capacity(8),
                             });
                             state.currect_step = Steps::End;
                         }
                     }
                     Steps::End => {
                         if !state.walls.contains(&temp_node) {
-                            agents.last_mut().unwrap().end_point = Some(temp_node);
+                            let last_agent = agents.last_mut().unwrap();
+                            last_agent.end_point = Some(temp_node);
+                            last_agent.collision_radius = last_agent.calculate_radius();
                             state.currect_step = Steps::Start;
                         }
                     }
