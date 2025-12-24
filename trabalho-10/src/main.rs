@@ -672,10 +672,10 @@ impl Agent {
     }
 
     fn calculate_forward(&self) -> Vec<Node> {
-        let mut temp_forward = Vec::with_capacity(3);
+        let mut temp_forward = Vec::with_capacity(2);
 
         if let Some(path) = &self.final_path {
-            for node in path.iter().skip(self.current_path_index + 1).take(3) {
+            for node in path.iter().skip(self.current_path_index + 1).take(2) {
                 if *node == self.end_point.unwrap() {
                     break;
                 }
@@ -1184,7 +1184,7 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
                     final_path: None,
                     current_path_index: 0,
                     collision_radius: Vec::with_capacity(8),
-                    forward_path: Vec::with_capacity(3),
+                    forward_path: Vec::with_capacity(2),
                     direction: None,
                 });
             }
@@ -1319,7 +1319,7 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
                                 final_path: None,
                                 current_path_index: 0,
                                 collision_radius: Vec::with_capacity(8),
-                                forward_path: Vec::with_capacity(3),
+                                forward_path: Vec::with_capacity(2),
                                 direction: None,
                             });
                             state.currect_step = Steps::End;
