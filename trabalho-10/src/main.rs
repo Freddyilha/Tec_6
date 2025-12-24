@@ -58,6 +58,19 @@ struct BufferInitHandler;
 struct GameStateInitHandler;
 struct CollisionLogger;
 
+#[derive(Hash, Eq, PartialEq, Copy, Clone)]
+struct AgentPair(usize, usize);
+
+impl AgentPair {
+    fn new(a: usize, b: usize) -> Self {
+        if a < b {
+            AgentPair(a, b)
+        } else {
+            AgentPair(b, a)
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct RerouteRequest {
     agent_id: usize,
@@ -173,6 +186,7 @@ struct CollisionEvent {
 
 struct CollisionDetector {
     observers: Vec<Rc<dyn CollisionObserver>>,
+    ignored_pairs: HashSet<AgentPair>,
 }
 
 // TRAITS
@@ -439,12 +453,19 @@ impl CollisionDetector {
     fn new() -> Self {
         CollisionDetector {
             observers: Vec::new(),
+            ignored_pairs: HashSet::new(),
         }
     }
 
     fn check_agents(&mut self, agents: &[Agent]) {
         for i in 0..agents.len() {
             for j in (i + 1)..agents.len() {
+                let pair = AgentPair::new(agents[i].id, agents[j].id);
+
+                if self.ignored_pairs.contains(&pair) {
+                    continue;
+                }
+
                 let agent1 = &agents[i];
                 let agent2 = &agents[j];
 
@@ -456,6 +477,7 @@ impl CollisionDetector {
                         collision_point: agent1.current_point,
                     };
                     self.notify_observers(&event);
+                    self.ignored_pairs.insert(pair);
                 } else if self.check_path_collision(agent1, agent2) {
                     if let Some(collision_point) = self.find_collision_path(agent1, agent2) {
                         let event = CollisionEvent {
@@ -465,6 +487,7 @@ impl CollisionDetector {
                             collision_point,
                         };
                         self.notify_observers(&event);
+                        self.ignored_pairs.insert(pair);
                     }
                 }
             }
@@ -882,17 +905,15 @@ fn a_star_with_avoidance(
 
             let mut tentative_g = *g_score.get(&position).unwrap_or(&i32::MAX) + 1;
 
-            // bias cost using preferred_direction (if present)
             if let Some(pref) = preferred_direction {
                 let mv = move_dir(position, neighbor);
 
                 if mv == pref {
-                    tentative_g -= 2; // bonus for moving in preferred direction
+                    tentative_g -= 4; // bonus for moving in preferred direction
                 } else if mv == negate(pref) {
                     tentative_g += 8; // penalty for moving opposite
                 } else if dot(mv, pref) == 0 {
-                    // perpendicular -> slight bonus
-                    tentative_g -= 1;
+                    tentative_g -= 1; // perpendicular -> slight bonus
                 }
             }
 
@@ -920,7 +941,6 @@ fn process_reroute_requests(
 ) {
     use std::collections::HashMap;
 
-    // Group requests by collision point (avoid_point)
     let mut by_point: HashMap<Node, Vec<usize>> = HashMap::new();
     for req in requests {
         by_point
@@ -929,19 +949,16 @@ fn process_reroute_requests(
             .push(req.agent_id);
     }
 
-    // For each collision point, decide a preferred avoidance direction per involved agent
     for (collision_point, agent_ids) in by_point {
         if agent_ids.is_empty() {
             continue;
         }
 
-        // If only one agent is in the requests for this point, just avoid the collision_point itself.
         if agent_ids.len() == 1 {
             let agent_id = agent_ids[0];
 
             if let Some(agent) = agents.iter_mut().find(|a| a.id == agent_id) {
                 if let Some(goal) = agent.end_point {
-                    // agent prefers to move away from the collision point (vector from collision to current)
                     let pref = move_dir(collision_point, agent.current_point);
                     let mut avoid_set = HashSet::new();
                     avoid_set.insert(collision_point);
@@ -971,17 +988,13 @@ fn process_reroute_requests(
             continue;
         }
 
-        // For multiple agents (pairs or more) at same collision point, compute pairwise avoidance.
-        // We will handle by producing a per-agent avoid set and preferred dir.
         let mut per_agent_avoids: HashMap<usize, (HashSet<Node>, Node)> = HashMap::new();
 
-        // compute directions for each involved agent
         let mut dirs: Vec<(usize, Node)> = Vec::new();
         for aid in &agent_ids {
             if let Some(agent) = agents.iter().find(|a| a.id == *aid) {
                 let d = agent.calculate_direction();
                 let final_dir = if is_zero_dir(d) && agent.end_point.is_some() {
-                    // fallback to rough direction toward goal
                     let goal = agent.end_point.unwrap();
                     Node {
                         x: (goal.x - agent.current_point.x).signum(),
@@ -994,20 +1007,16 @@ fn process_reroute_requests(
             }
         }
 
-        // For simplicity handle only pairs deterministically; if more than 2, handle iteratively
         if dirs.len() >= 2 {
-            // pairwise handle the first two, and for extra agents apply rotate strategy
             let (a_id, a_dir) = dirs[0];
             let (b_id, b_dir) = dirs[1];
 
-            // choose plan: lower id takes "follow other's direction", higher id takes "inverse other's direction"
             let (avoid_a_dir, avoid_b_dir) = if a_id <= b_id {
                 (b_dir, negate(a_dir))
             } else {
                 (negate(b_dir), a_dir)
             };
 
-            // construct avoid nodes (prefer to block the cell in chosen avoid direction from collision point)
             let a_avoid_node = Node {
                 x: collision_point.x + avoid_a_dir.x,
                 y: collision_point.y + avoid_a_dir.y,
@@ -1032,7 +1041,6 @@ fn process_reroute_requests(
             per_agent_avoids.insert(a_id, (a_avoid_set, avoid_a_dir));
             per_agent_avoids.insert(b_id, (b_avoid_set, avoid_b_dir));
 
-            // If there are more agents (3+), give them left/right rotated directions
             for (extra_id, extra_dir) in dirs.into_iter().skip(2) {
                 let rot = rotate_right(extra_dir);
                 let avoid_node = Node {
@@ -1047,7 +1055,6 @@ fn process_reroute_requests(
                 per_agent_avoids.insert(extra_id, (s, rot));
             }
         } else {
-            // fallback single-agent case (should have been handled above)
             for (aid, _) in dirs {
                 let mut s = HashSet::new();
                 s.insert(collision_point);
@@ -1055,7 +1062,6 @@ fn process_reroute_requests(
             }
         }
 
-        // Apply reroute for every agent in per_agent_avoids
         for (agent_id, (avoid_set, preferred_dir)) in per_agent_avoids {
             if let Some(agent) = agents.iter_mut().find(|a| a.id == agent_id) {
                 if let Some(goal) = agent.end_point {
@@ -1070,7 +1076,6 @@ fn process_reroute_requests(
                         goal,
                         walls,
                         &avoid_set,
-                        // if preferred_dir is zero, pass None to keep normal behavior
                         if is_zero_dir(preferred_dir) {
                             None
                         } else {
@@ -1135,6 +1140,9 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
                     }
                 }
             }
+
+            collision_detector.ignored_pairs.clear();
+
             // collision_detector.check_agents(&agents);
             //
             // if assistant.has_requests() {
