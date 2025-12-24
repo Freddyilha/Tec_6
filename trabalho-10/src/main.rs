@@ -1,5 +1,6 @@
 use minifb::{Key, MouseButton, Window, WindowOptions};
 use rand::Rng;
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::collections::{BinaryHeap, HashMap};
@@ -18,6 +19,37 @@ const LIGHT_BLUE: u32 = 0x00ADD8E6;
 const CELL_WIDTH: usize = WIDTH / COLUMNS;
 const CELL_HEIGHT: usize = HEIGHT / ROWS;
 
+fn move_dir(a: Node, b: Node) -> Node {
+    Node {
+        x: b.x - a.x,
+        y: b.y - a.y,
+    }
+}
+
+fn dot(a: Node, b: Node) -> i32 {
+    a.x * b.x + a.y * b.y
+}
+
+fn is_zero_dir(d: Node) -> bool {
+    d.x == 0 && d.y == 0
+}
+
+fn rotate_right(d: Node) -> Node {
+    Node { x: d.y, y: -d.x }
+}
+
+fn rotate_left(d: Node) -> Node {
+    Node { x: -d.y, y: d.x }
+}
+
+fn negate(d: Node) -> Node {
+    Node { x: -d.x, y: -d.y }
+}
+
+fn in_bounds(n: Node) -> bool {
+    n.x >= 0 && n.y >= 0 && (n.x as usize) < COLUMNS && (n.y as usize) < ROWS
+}
+
 // Structs
 struct PixelArtist;
 struct ArtistFactory;
@@ -25,7 +57,16 @@ struct WindowInitHandler;
 struct BufferInitHandler;
 struct GameStateInitHandler;
 struct CollisionLogger;
-struct CollisionAssistant;
+
+#[derive(Debug, Clone)]
+struct RerouteRequest {
+    agent_id: usize,
+    avoid_point: Node,
+}
+
+struct CollisionAssistant {
+    reroute_requests: RefCell<Vec<RerouteRequest>>,
+}
 
 #[derive(Debug)]
 struct OrthogonalMovement;
@@ -42,6 +83,7 @@ struct Agent {
     current_path_index: usize,
     collision_radius: Vec<Node>,
     forward_path: Vec<Node>,
+    direction: Option<Node>,
 }
 
 #[derive(Debug, Clone)]
@@ -537,13 +579,13 @@ impl CollisionObserver for CollisionLogger {
         match event.collision_type {
             CollisionType::Direct => {}
             CollisionType::Proximity => {
-                println!(
-                    "Região em volta dos agentes {} e {} encostou com outro agente na posição: ({}, {})",
-                    event.agent1_id,
-                    event.agent2_id,
-                    event.collision_point.x,
-                    event.collision_point.y
-                );
+                // println!(
+                //     "Região em volta dos agentes {} e {} encostou com outro agente na posição: ({}, {})",
+                //     event.agent1_id,
+                //     event.agent2_id,
+                //     event.collision_point.x,
+                //     event.collision_point.y
+                // );
             }
         }
     }
@@ -554,15 +596,25 @@ impl CollisionObserver for CollisionAssistant {
         match event.collision_type {
             CollisionType::Direct => {
                 println!(
-                    "Colisão entre agentes {} e {}",
+                    "COLISÃO ENTRE AGENTES {} e {}",
                     event.agent1_id, event.agent2_id
                 );
             }
             CollisionType::Proximity => {
-                println!(
-                    "Perigo entre agentes {} e {}",
-                    event.agent1_id, event.agent2_id
-                );
+                // println!(
+                //     "Perigo entre agentes {} e {}",
+                //     event.agent1_id, event.agent2_id
+                // );
+
+                self.reroute_requests.borrow_mut().push(RerouteRequest {
+                    agent_id: event.agent1_id,
+                    avoid_point: event.collision_point,
+                });
+
+                self.reroute_requests.borrow_mut().push(RerouteRequest {
+                    agent_id: event.agent2_id,
+                    avoid_point: event.collision_point,
+                });
             }
         }
     }
@@ -570,7 +622,21 @@ impl CollisionObserver for CollisionAssistant {
 
 impl CollisionAssistant {
     fn new() -> Self {
-        CollisionAssistant {}
+        CollisionAssistant {
+            reroute_requests: RefCell::new(Vec::new()),
+        }
+    }
+
+    fn get_reroute_requests(&self) -> Vec<RerouteRequest> {
+        self.reroute_requests.borrow().clone()
+    }
+
+    fn clear_requests(&self) {
+        self.reroute_requests.borrow_mut().clear();
+    }
+
+    fn has_requests(&self) -> bool {
+        !self.reroute_requests.borrow().is_empty()
     }
 }
 
@@ -621,6 +687,23 @@ impl Agent {
         }
 
         temp_forward
+    }
+
+    fn calculate_direction(&self) -> Node {
+        if let Some(path) = &self.final_path {
+            if self.current_path_index + 1 < path.len() {
+                let next = path[self.current_path_index + 1];
+                return move_dir(self.current_point, next);
+            }
+        }
+
+        if let Some(goal) = self.end_point {
+            let dx = (goal.x - self.current_point.x).signum();
+            let dy = (goal.y - self.current_point.y).signum();
+            return Node { x: dx, y: dy };
+        }
+
+        Node { x: 0, y: 0 }
     }
 }
 
@@ -762,6 +845,253 @@ fn a_star(
     None
 }
 
+fn a_star_with_avoidance(
+    start: Node,
+    goal: Node,
+    walls: &HashSet<Node>,
+    avoid_points: &HashSet<Node>,
+    preferred_direction: Option<Node>,
+    movement: &dyn MovementStrategy,
+) -> Option<Vec<Node>> {
+    let mut open_set = BinaryHeap::new();
+    let mut came_from: HashMap<Node, Node> = HashMap::new();
+    let mut g_score: HashMap<Node, i32> = HashMap::new();
+
+    g_score.insert(start, 0);
+    open_set.push(State {
+        cost: heuristic(start, goal),
+        position: start,
+    });
+
+    while let Some(State { cost: _, position }) = open_set.pop() {
+        if position == goal {
+            let mut path = vec![position];
+            let mut current = position;
+            while let Some(&prev) = came_from.get(&current) {
+                path.push(prev);
+                current = prev;
+            }
+            path.reverse();
+            return Some(path);
+        }
+
+        for neighbor in movement.get_neighbors(position, ROWS, COLUMNS) {
+            if walls.contains(&neighbor) || avoid_points.contains(&neighbor) {
+                continue;
+            }
+
+            let mut tentative_g = *g_score.get(&position).unwrap_or(&i32::MAX) + 1;
+
+            // bias cost using preferred_direction (if present)
+            if let Some(pref) = preferred_direction {
+                let mv = move_dir(position, neighbor);
+
+                if mv == pref {
+                    tentative_g -= 2; // bonus for moving in preferred direction
+                } else if mv == negate(pref) {
+                    tentative_g += 8; // penalty for moving opposite
+                } else if dot(mv, pref) == 0 {
+                    // perpendicular -> slight bonus
+                    tentative_g -= 1;
+                }
+            }
+
+            if tentative_g < *g_score.get(&neighbor).unwrap_or(&i32::MAX) {
+                came_from.insert(neighbor, position);
+                g_score.insert(neighbor, tentative_g);
+
+                let f = tentative_g + heuristic(neighbor, goal);
+                open_set.push(State {
+                    cost: f,
+                    position: neighbor,
+                });
+            }
+        }
+    }
+
+    None
+}
+
+fn process_reroute_requests(
+    agents: &mut [Agent],
+    requests: &[RerouteRequest],
+    walls: &HashSet<Node>,
+    movement_strategy: &dyn MovementStrategy,
+) {
+    use std::collections::HashMap;
+
+    // Group requests by collision point (avoid_point)
+    let mut by_point: HashMap<Node, Vec<usize>> = HashMap::new();
+    for req in requests {
+        by_point
+            .entry(req.avoid_point)
+            .or_insert_with(Vec::new)
+            .push(req.agent_id);
+    }
+
+    // For each collision point, decide a preferred avoidance direction per involved agent
+    for (collision_point, agent_ids) in by_point {
+        if agent_ids.is_empty() {
+            continue;
+        }
+
+        // If only one agent is in the requests for this point, just avoid the collision_point itself.
+        if agent_ids.len() == 1 {
+            let agent_id = agent_ids[0];
+
+            if let Some(agent) = agents.iter_mut().find(|a| a.id == agent_id) {
+                if let Some(goal) = agent.end_point {
+                    // agent prefers to move away from the collision point (vector from collision to current)
+                    let pref = move_dir(collision_point, agent.current_point);
+                    let mut avoid_set = HashSet::new();
+                    avoid_set.insert(collision_point);
+
+                    // println!(
+                    //     "🔄 Recalculating path for agent {} avoiding point ({},{})",
+                    //     agent_id, collision_point.x, collision_point.y
+                    // );
+
+                    if let Some(new_path) = a_star_with_avoidance(
+                        agent.current_point,
+                        goal,
+                        walls,
+                        &avoid_set,
+                        Some(pref),
+                        movement_strategy,
+                    ) {
+                        agent.final_path = Some(new_path);
+                        agent.current_path_index = 0;
+                        agent.collision_radius = agent.calculate_radius();
+                        // println!("✅ New path for agent {}", agent_id);
+                    } else {
+                        // println!("❌ Could not find alternative path for agent {}", agent_id);
+                    }
+                }
+            }
+            continue;
+        }
+
+        // For multiple agents (pairs or more) at same collision point, compute pairwise avoidance.
+        // We will handle by producing a per-agent avoid set and preferred dir.
+        let mut per_agent_avoids: HashMap<usize, (HashSet<Node>, Node)> = HashMap::new();
+
+        // compute directions for each involved agent
+        let mut dirs: Vec<(usize, Node)> = Vec::new();
+        for aid in &agent_ids {
+            if let Some(agent) = agents.iter().find(|a| a.id == *aid) {
+                let d = agent.calculate_direction();
+                let final_dir = if is_zero_dir(d) && agent.end_point.is_some() {
+                    // fallback to rough direction toward goal
+                    let goal = agent.end_point.unwrap();
+                    Node {
+                        x: (goal.x - agent.current_point.x).signum(),
+                        y: (goal.y - agent.current_point.y).signum(),
+                    }
+                } else {
+                    d
+                };
+                dirs.push((*aid, final_dir));
+            }
+        }
+
+        // For simplicity handle only pairs deterministically; if more than 2, handle iteratively
+        if dirs.len() >= 2 {
+            // pairwise handle the first two, and for extra agents apply rotate strategy
+            let (a_id, a_dir) = dirs[0];
+            let (b_id, b_dir) = dirs[1];
+
+            // choose plan: lower id takes "follow other's direction", higher id takes "inverse other's direction"
+            let (avoid_a_dir, avoid_b_dir) = if a_id <= b_id {
+                (b_dir, negate(a_dir))
+            } else {
+                (negate(b_dir), a_dir)
+            };
+
+            // construct avoid nodes (prefer to block the cell in chosen avoid direction from collision point)
+            let a_avoid_node = Node {
+                x: collision_point.x + avoid_a_dir.x,
+                y: collision_point.y + avoid_a_dir.y,
+            };
+            let b_avoid_node = Node {
+                x: collision_point.x + avoid_b_dir.x,
+                y: collision_point.y + avoid_b_dir.y,
+            };
+
+            let mut a_avoid_set = HashSet::new();
+            a_avoid_set.insert(collision_point);
+            if in_bounds(a_avoid_node) {
+                a_avoid_set.insert(a_avoid_node);
+            }
+
+            let mut b_avoid_set = HashSet::new();
+            b_avoid_set.insert(collision_point);
+            if in_bounds(b_avoid_node) {
+                b_avoid_set.insert(b_avoid_node);
+            }
+
+            per_agent_avoids.insert(a_id, (a_avoid_set, avoid_a_dir));
+            per_agent_avoids.insert(b_id, (b_avoid_set, avoid_b_dir));
+
+            // If there are more agents (3+), give them left/right rotated directions
+            for (extra_id, extra_dir) in dirs.into_iter().skip(2) {
+                let rot = rotate_right(extra_dir);
+                let avoid_node = Node {
+                    x: collision_point.x + rot.x,
+                    y: collision_point.y + rot.y,
+                };
+                let mut s = HashSet::new();
+                s.insert(collision_point);
+                if in_bounds(avoid_node) {
+                    s.insert(avoid_node);
+                }
+                per_agent_avoids.insert(extra_id, (s, rot));
+            }
+        } else {
+            // fallback single-agent case (should have been handled above)
+            for (aid, _) in dirs {
+                let mut s = HashSet::new();
+                s.insert(collision_point);
+                per_agent_avoids.insert(aid, (s, Node { x: 0, y: 0 }));
+            }
+        }
+
+        // Apply reroute for every agent in per_agent_avoids
+        for (agent_id, (avoid_set, preferred_dir)) in per_agent_avoids {
+            if let Some(agent) = agents.iter_mut().find(|a| a.id == agent_id) {
+                if let Some(goal) = agent.end_point {
+                    // println!(
+                    //     "🔄 Recalculating path for agent {} avoiding {} point(s)",
+                    //     agent_id,
+                    //     avoid_set.len()
+                    // );
+
+                    if let Some(new_path) = a_star_with_avoidance(
+                        agent.current_point,
+                        goal,
+                        walls,
+                        &avoid_set,
+                        // if preferred_dir is zero, pass None to keep normal behavior
+                        if is_zero_dir(preferred_dir) {
+                            None
+                        } else {
+                            Some(preferred_dir)
+                        },
+                        movement_strategy,
+                    ) {
+                        agent.final_path = Some(new_path);
+                        agent.current_path_index = 0;
+                        agent.collision_radius = agent.calculate_radius();
+                        agent.forward_path = agent.calculate_forward();
+                        // println!("✅ New path calculated for agent {}", agent_id);
+                    } else {
+                        // println!("❌ Could not find alternative path for agent {}", agent_id);
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) {
     let artist = ArtistFactory::create(ArtistType::Normal);
     let mut movement = PathMovement::new();
@@ -772,7 +1102,7 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
     let logger = Rc::new(CollisionLogger);
     let assistant = Rc::new(CollisionAssistant::new());
     collision_detector.register_observer(logger);
-    collision_detector.register_observer(assistant);
+    collision_detector.register_observer(assistant.clone());
 
     while window.is_open() && !window.is_key_down(minifb::Key::Escape) {
         buffer.fill(WHITE);
@@ -805,7 +1135,18 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
                     }
                 }
             }
-            collision_detector.check_agents(&agents);
+            // collision_detector.check_agents(&agents);
+            //
+            // if assistant.has_requests() {
+            //     let requests = assistant.get_reroute_requests();
+            //     process_reroute_requests(
+            //         &mut agents,
+            //         &requests,
+            //         &state.walls,
+            //         state.movement_strategy.as_ref(),
+            //     );
+            //     assistant.clear_requests();
+            // }
         }
 
         if window.is_key_pressed(Key::N, minifb::KeyRepeat::No) {
@@ -844,6 +1185,7 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
                     current_path_index: 0,
                     collision_radius: Vec::with_capacity(8),
                     forward_path: Vec::with_capacity(3),
+                    direction: None,
                 });
             }
         }
@@ -978,6 +1320,7 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
                                 current_path_index: 0,
                                 collision_radius: Vec::with_capacity(8),
                                 forward_path: Vec::with_capacity(3),
+                                direction: None,
                             });
                             state.currect_step = Steps::End;
                         }
@@ -992,6 +1335,19 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
                     }
                 }
             }
+        }
+
+        collision_detector.check_agents(&agents);
+
+        if assistant.has_requests() {
+            let requests = assistant.get_reroute_requests();
+            process_reroute_requests(
+                &mut agents,
+                &requests,
+                &state.walls,
+                state.movement_strategy.as_ref(),
+            );
+            assistant.clear_requests();
         }
 
         state.was_pressed = is_pressed;
