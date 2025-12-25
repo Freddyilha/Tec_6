@@ -1,10 +1,16 @@
+use chrono::prelude::*;
+use csv::Writer;
 use minifb::{Key, MouseButton, Window, WindowOptions};
 use rand::Rng;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::collections::{BinaryHeap, HashMap};
+use std::error::Error;
+use std::fs::OpenOptions;
+use std::path::Path;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 const WIDTH: usize = 1000;
 const HEIGHT: usize = 1000;
@@ -18,6 +24,58 @@ const ORANGE: u32 = 0x00FF963C;
 const LIGHT_BLUE: u32 = 0x00ADD8E6;
 const CELL_WIDTH: usize = WIDTH / COLUMNS;
 const CELL_HEIGHT: usize = HEIGHT / ROWS;
+
+struct Statistics {
+    how_many_recalculations: usize,
+    how_many_collisions: usize,
+    how_many_detections: usize,
+    total_agents_path_length: usize,
+    how_many_steps_agents_made: usize,
+}
+
+impl Statistics {
+    fn new() -> Self {
+        Statistics {
+            how_many_recalculations: 0,
+            how_many_detections: 0,
+            how_many_collisions: 0,
+            total_agents_path_length: 0,
+            how_many_steps_agents_made: 0,
+        }
+    }
+}
+
+fn save_statistics(stats: &Statistics) -> Result<(), Box<dyn Error>> {
+    let path = "stats.csv";
+    let file_exists = Path::new(path).exists();
+
+    let file = OpenOptions::new().append(true).create(true).open(path)?;
+
+    let mut wtr = Writer::from_writer(file);
+
+    if !file_exists {
+        wtr.write_record(&[
+            "timestamp",
+            "how_many_recalculations",
+            "how_many_collisions",
+            "how_many_detections",
+            "total_agents_path_length",
+            "how_many_steps_agents_made",
+        ])?;
+    }
+
+    wtr.write_record(&[
+        Local::now().to_string(),
+        stats.how_many_recalculations.to_string(),
+        stats.how_many_collisions.to_string(),
+        stats.how_many_detections.to_string(),
+        stats.total_agents_path_length.to_string(),
+        stats.how_many_steps_agents_made.to_string(),
+    ])?;
+
+    wtr.flush()?;
+    Ok(())
+}
 
 fn move_dir(a: Node, b: Node) -> Node {
     Node {
@@ -457,7 +515,7 @@ impl CollisionDetector {
         }
     }
 
-    fn check_agents(&mut self, agents: &[Agent]) {
+    fn check_agents(&mut self, agents: &[Agent], stats: &mut Statistics) {
         for i in 0..agents.len() {
             for j in (i + 1)..agents.len() {
                 let pair = AgentPair::new(agents[i].id, agents[j].id);
@@ -478,6 +536,8 @@ impl CollisionDetector {
                     };
                     self.notify_observers(&event);
                     self.ignored_pairs.insert(pair);
+
+                    stats.how_many_collisions += 1;
                 } else if self.check_path_collision(agent1, agent2) {
                     if let Some(collision_point) = self.find_collision_path(agent1, agent2) {
                         let event = CollisionEvent {
@@ -488,6 +548,8 @@ impl CollisionDetector {
                         };
                         self.notify_observers(&event);
                         self.ignored_pairs.insert(pair);
+
+                        stats.how_many_detections += 1;
                     }
                 }
             }
@@ -938,6 +1000,7 @@ fn process_reroute_requests(
     requests: &[RerouteRequest],
     walls: &HashSet<Node>,
     movement_strategy: &dyn MovementStrategy,
+    stats: &mut Statistics,
 ) {
     use std::collections::HashMap;
 
@@ -976,6 +1039,7 @@ fn process_reroute_requests(
                         Some(pref),
                         movement_strategy,
                     ) {
+                        stats.how_many_recalculations += 1;
                         agent.final_path = Some(new_path);
                         agent.current_path_index = 0;
                         agent.collision_radius = agent.calculate_radius();
@@ -1083,6 +1147,7 @@ fn process_reroute_requests(
                         },
                         movement_strategy,
                     ) {
+                        stats.how_many_recalculations += 1;
                         agent.final_path = Some(new_path);
                         agent.current_path_index = 0;
                         agent.collision_radius = agent.calculate_radius();
@@ -1098,10 +1163,12 @@ fn process_reroute_requests(
 }
 
 fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) {
+    let mut stats = Statistics::new();
     let artist = ArtistFactory::create(ArtistType::Normal);
     let mut movement = PathMovement::new();
     let mut history = CommandHistory::new();
     let mut agents: Vec<Agent> = Vec::new();
+    let mut last_log_time = Instant::now();
 
     let mut collision_detector = CollisionDetector::new();
     let logger = Rc::new(CollisionLogger);
@@ -1139,6 +1206,8 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
                         agent.forward_path = agent.calculate_forward();
                     }
                 }
+
+                stats.how_many_steps_agents_made += 1;
             }
 
             collision_detector.ignored_pairs.clear();
@@ -1202,6 +1271,7 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
             if state.currect_step == Steps::Start || state.currect_step == Steps::Obstacles {
                 movement.steps.clear();
                 history.history.clear();
+                let mut temp_path_length = 0;
 
                 for agent in &mut agents {
                     if let Some(path) = a_star(
@@ -1210,6 +1280,7 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
                         &state.walls,
                         state.movement_strategy.as_ref(),
                     ) {
+                        temp_path_length += &path.len();
                         agent.final_path = Some(path);
 
                         agent.current_point = agent.start_point;
@@ -1220,6 +1291,8 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
                         println!("No path found — goal is blocked.");
                     }
                 }
+
+                stats.total_agents_path_length += temp_path_length;
             }
         }
 
@@ -1345,7 +1418,7 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
             }
         }
 
-        collision_detector.check_agents(&agents);
+        collision_detector.check_agents(&agents, &mut stats);
 
         if assistant.has_requests() {
             let requests = assistant.get_reroute_requests();
@@ -1354,10 +1427,15 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
                 &requests,
                 &state.walls,
                 state.movement_strategy.as_ref(),
+                &mut stats,
             );
             assistant.clear_requests();
         }
 
+        if last_log_time.elapsed() >= Duration::from_secs(1) {
+            save_statistics(&stats).unwrap();
+            last_log_time = Instant::now();
+        }
         state.was_pressed = is_pressed;
         window.update_with_buffer(&buffer, WIDTH, HEIGHT).unwrap();
     }
