@@ -41,12 +41,19 @@ struct Node {
 }
 
 impl Node {
-    fn ux(self) -> usize { self.x as usize }
-    fn uy(self) -> usize { self.y as usize }
+    fn ux(self) -> usize {
+        self.x as usize
+    }
+    fn uy(self) -> usize {
+        self.y as usize
+    }
 }
 
 fn move_dir(a: Node, b: Node) -> Node {
-    Node { x: b.x - a.x, y: b.y - a.y }
+    Node {
+        x: b.x - a.x,
+        y: b.y - a.y,
+    }
 }
 
 fn dot(a: Node, b: Node) -> i32 {
@@ -57,9 +64,15 @@ fn is_zero_dir(d: Node) -> bool {
     d.x == 0 && d.y == 0
 }
 
-fn rotate_right(d: Node) -> Node { Node { x: d.y, y: -d.x } }
-fn rotate_left(d: Node) -> Node  { Node { x: -d.y, y: d.x } }
-fn negate(d: Node) -> Node       { Node { x: -d.x, y: -d.y } }
+fn rotate_right(d: Node) -> Node {
+    Node { x: d.y, y: -d.x }
+}
+fn rotate_left(d: Node) -> Node {
+    Node { x: -d.y, y: d.x }
+}
+fn negate(d: Node) -> Node {
+    Node { x: -d.x, y: -d.y }
+}
 
 fn in_bounds(n: Node) -> bool {
     n.x >= 0 && n.y >= 0 && (n.x as usize) < COLUMNS && (n.y as usize) < ROWS
@@ -123,9 +136,24 @@ fn save_statistics(stats: &Statistics) -> Result<(), Box<dyn Error>> {
 // Drawing primitives
 // ---------------------------------------------------------------------------
 
-struct LineParams   { x0: i32, y0: i32, x1: i32, y1: i32, color: u32 }
-struct SquareParams { x: usize, y: usize, color: u32 }
-struct CircleParams { x: usize, y: usize, radius: usize, color: u32 }
+struct LineParams {
+    x0: i32,
+    y0: i32,
+    x1: i32,
+    y1: i32,
+    color: u32,
+}
+struct SquareParams {
+    x: usize,
+    y: usize,
+    color: u32,
+}
+struct CircleParams {
+    x: usize,
+    y: usize,
+    radius: usize,
+    color: u32,
+}
 
 enum DrawType {
     Line(LineParams),
@@ -135,7 +163,7 @@ enum DrawType {
 
 fn draw(buffer: &mut [u32], item: &DrawType) {
     match item {
-        DrawType::Line(p)   => draw_line(buffer, p),
+        DrawType::Line(p) => draw_line(buffer, p),
         DrawType::Square(p) => draw_square(buffer, p),
         DrawType::Circle(p) => draw_circle(buffer, p),
     }
@@ -143,28 +171,36 @@ fn draw(buffer: &mut [u32], item: &DrawType) {
 
 fn draw_line(buffer: &mut [u32], p: &LineParams) {
     let (mut x0, mut y0) = (p.x0, p.y0);
-    let (x1, y1)         = (p.x1, p.y1);
-    let dx  = (x1 - x0).abs();
-    let sx  = if x0 < x1 { 1 } else { -1 };
-    let dy  = -(y1 - y0).abs();
-    let sy  = if y0 < y1 { 1 } else { -1 };
+    let (x1, y1) = (p.x1, p.y1);
+    let dx = (x1 - x0).abs();
+    let sx = if x0 < x1 { 1 } else { -1 };
+    let dy = -(y1 - y0).abs();
+    let sy = if y0 < y1 { 1 } else { -1 };
     let mut err = dx + dy;
 
     loop {
         if x0 >= 0 && y0 >= 0 && (x0 as usize) < WIDTH && (y0 as usize) < HEIGHT {
             buffer[y0 as usize * WIDTH + x0 as usize] = p.color;
         }
-        if x0 == x1 && y0 == y1 { break; }
+        if x0 == x1 && y0 == y1 {
+            break;
+        }
 
         let e2 = 2 * err;
-        if e2 >= dy { err += dy; x0 += sx; }
-        if e2 <= dx { err += dx; y0 += sy; }
+        if e2 >= dy {
+            err += dy;
+            x0 += sx;
+        }
+        if e2 <= dx {
+            err += dx;
+            y0 += sy;
+        }
     }
 }
 
 fn draw_circle(buffer: &mut [u32], p: &CircleParams) {
     let cx = p.x * CELL_HEIGHT + CELL_WIDTH / 2;
-    let cy = p.y * CELL_WIDTH  + CELL_HEIGHT / 2;
+    let cy = p.y * CELL_WIDTH + CELL_HEIGHT / 2;
     let r2 = (p.radius * p.radius) as isize;
 
     let y_lo = cy.saturating_sub(p.radius);
@@ -194,15 +230,29 @@ fn draw_square(buffer: &mut [u32], p: &SquareParams) {
 fn draw_matrix(buffer: &mut [u32]) {
     for i in 1..ROWS {
         let px = (WIDTH / ROWS) * i;
-        draw(buffer, &DrawType::Line(LineParams {
-            x0: px as i32, y0: 0, x1: px as i32, y1: HEIGHT as i32, color: BLACK,
-        }));
+        draw(
+            buffer,
+            &DrawType::Line(LineParams {
+                x0: px as i32,
+                y0: 0,
+                x1: px as i32,
+                y1: HEIGHT as i32,
+                color: BLACK,
+            }),
+        );
     }
     for i in 1..COLUMNS {
         let py = (HEIGHT / COLUMNS) * i;
-        draw(buffer, &DrawType::Line(LineParams {
-            x0: 0, y0: py as i32, x1: WIDTH as i32, y1: py as i32, color: BLACK,
-        }));
+        draw(
+            buffer,
+            &DrawType::Line(LineParams {
+                x0: 0,
+                y0: py as i32,
+                x1: WIDTH as i32,
+                y1: py as i32,
+                color: BLACK,
+            }),
+        );
     }
 }
 
@@ -220,27 +270,45 @@ struct DiagonalMovement;
 
 impl MovementStrategy for OrthogonalMovement {
     fn get_neighbors(&self, node: Node) -> Vec<Node> {
-        const DELTAS: [(i32, i32); 4] = [(1,0), (-1,0), (0,1), (0,-1)];
-        DELTAS.iter()
-            .map(|&(dx, dy)| Node { x: node.x + dx, y: node.y + dy })
+        const DELTAS: [(i32, i32); 4] = [(1, 0), (-1, 0), (0, 1), (0, -1)];
+        DELTAS
+            .iter()
+            .map(|&(dx, dy)| Node {
+                x: node.x + dx,
+                y: node.y + dy,
+            })
             .filter(|n| in_bounds(*n))
             .collect()
     }
-    fn name(&self) -> &str { "Orthogonal" }
+    fn name(&self) -> &str {
+        "Orthogonal"
+    }
 }
 
 impl MovementStrategy for DiagonalMovement {
     fn get_neighbors(&self, node: Node) -> Vec<Node> {
         const DELTAS: [(i32, i32); 8] = [
-            (1,0), (-1,0), (0,1), (0,-1),
-            (1,1), (1,-1), (-1,1), (-1,-1),
+            (1, 0),
+            (-1, 0),
+            (0, 1),
+            (0, -1),
+            (1, 1),
+            (1, -1),
+            (-1, 1),
+            (-1, -1),
         ];
-        DELTAS.iter()
-            .map(|&(dx, dy)| Node { x: node.x + dx, y: node.y + dy })
+        DELTAS
+            .iter()
+            .map(|&(dx, dy)| Node {
+                x: node.x + dx,
+                y: node.y + dy,
+            })
             .filter(|n| in_bounds(*n))
             .collect()
     }
-    fn name(&self) -> &str { "Diagonal" }
+    fn name(&self) -> &str {
+        "Diagonal"
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -252,7 +320,9 @@ trait Command {
     fn undo(&mut self, steps: &mut Vec<Vec<Node>>);
 }
 
-struct WriteCommand { step: Vec<Node> }
+struct WriteCommand {
+    step: Vec<Node>,
+}
 
 impl Command for WriteCommand {
     fn execute(&mut self, steps: &mut Vec<Vec<Node>>) {
@@ -270,7 +340,10 @@ struct DeleteCommand {
 
 impl DeleteCommand {
     fn new(count: usize) -> Self {
-        DeleteCommand { count, deleted: Vec::new() }
+        DeleteCommand {
+            count,
+            deleted: Vec::new(),
+        }
     }
 }
 
@@ -290,7 +363,11 @@ struct CommandHistory {
 }
 
 impl CommandHistory {
-    fn new() -> Self { CommandHistory { history: Vec::new() } }
+    fn new() -> Self {
+        CommandHistory {
+            history: Vec::new(),
+        }
+    }
 
     fn execute(&mut self, mut cmd: Box<dyn Command>, steps: &mut Vec<Vec<Node>>) {
         cmd.execute(steps);
@@ -338,10 +415,17 @@ impl Agent {
 
     fn calc_radius(&self) -> Vec<Node> {
         const DELTAS: [(i32, i32); 8] = [
-            (1,0), (-1,0), (0,1), (0,-1),
-            (1,1), (1,-1), (-1,1), (-1,-1),
+            (1, 0),
+            (-1, 0),
+            (0, 1),
+            (0, -1),
+            (1, 1),
+            (1, -1),
+            (-1, 1),
+            (-1, -1),
         ];
-        DELTAS.iter()
+        DELTAS
+            .iter()
             .map(|&(dx, dy)| Node {
                 x: self.current_point.x + dx,
                 y: self.current_point.y + dy,
@@ -351,8 +435,13 @@ impl Agent {
     }
 
     fn calc_forward(&self) -> Vec<Node> {
-        let Some(path) = &self.path else { return Vec::new() };
-        let goal = match self.end_point { Some(g) => g, None => return Vec::new() };
+        let Some(path) = &self.path else {
+            return Vec::new();
+        };
+        let goal = match self.end_point {
+            Some(g) => g,
+            None => return Vec::new(),
+        };
 
         path.iter()
             .skip(self.path_index + 1)
@@ -387,8 +476,68 @@ impl Agent {
 // Collision detection (Observer pattern)
 // ---------------------------------------------------------------------------
 
+trait CollisionStrategy {
+    fn detect(&self, a: &Agent, b: &Agent) -> Option<CollisionEvent>;
+    fn name(&self) -> &str;
+}
+
+struct CollisionDetector {
+    observers: Vec<Rc<dyn CollisionObserver>>,
+    ignored_pairs: HashSet<AgentPair>,
+    strategy: Box<dyn CollisionStrategy>,
+}
+
+impl CollisionDetector {
+    fn new(strategy: Box<dyn CollisionStrategy>) -> Self {
+        Self {
+            observers: Vec::new(),
+            ignored_pairs: HashSet::new(),
+            strategy,
+        }
+    }
+
+    fn set_strategy(&mut self, strategy: Box<dyn CollisionStrategy>) {
+        self.strategy = strategy;
+        self.ignored_pairs.clear();
+    }
+
+    fn notify(&self, event: &CollisionEvent) {
+        for obs in &self.observers {
+            obs.on_collision(event);
+        }
+    }
+
+    fn register_observer(&mut self, obs: Rc<dyn CollisionObserver>) {
+        self.observers.push(obs);
+    }
+
+    fn check_agents(&mut self, agents: &[Agent], stats: &mut Statistics) {
+        for i in 0..agents.len() {
+            for j in (i + 1)..agents.len() {
+                let pair = AgentPair::new(agents[i].id, agents[j].id);
+                if self.ignored_pairs.contains(&pair) {
+                    continue;
+                }
+
+                if let Some(event) = self.strategy.detect(&agents[i], &agents[j]) {
+                    self.notify(&event);
+                    self.ignored_pairs.insert(pair);
+
+                    match event.collision_type {
+                        CollisionType::Direct => stats.collisions += 1,
+                        CollisionType::Proximity => stats.detections += 1,
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
-enum CollisionType { Direct, Proximity }
+enum CollisionType {
+    Direct,
+    Proximity,
+}
 
 struct CollisionEvent {
     agent1_id: usize,
@@ -406,78 +555,92 @@ struct AgentPair(usize, usize);
 
 impl AgentPair {
     fn new(a: usize, b: usize) -> Self {
-        if a < b { AgentPair(a, b) } else { AgentPair(b, a) }
+        if a < b {
+            AgentPair(a, b)
+        } else {
+            AgentPair(b, a)
+        }
     }
 }
 
-struct CollisionDetector {
-    observers: Vec<Rc<dyn CollisionObserver>>,
-    ignored_pairs: HashSet<AgentPair>,
-}
+struct PathCollisionStrategy;
 
-impl CollisionDetector {
-    fn new() -> Self {
-        CollisionDetector {
-            observers: Vec::new(),
-            ignored_pairs: HashSet::new(),
+impl CollisionStrategy for PathCollisionStrategy {
+    fn detect(&self, a: &Agent, b: &Agent) -> Option<CollisionEvent> {
+        if a.current_point == b.current_point {
+            return Some(CollisionEvent {
+                agent1_id: a.id,
+                agent2_id: b.id,
+                collision_type: CollisionType::Direct,
+                collision_point: a.current_point,
+            });
         }
-    }
 
-    fn register_observer(&mut self, obs: Rc<dyn CollisionObserver>) {
-        self.observers.push(obs);
-    }
-
-    fn notify(&self, event: &CollisionEvent) {
-        for obs in &self.observers {
-            obs.on_collision(event);
-        }
-    }
-
-    fn check_agents(&mut self, agents: &[Agent], stats: &mut Statistics) {
-        for i in 0..agents.len() {
-            for j in (i + 1)..agents.len() {
-                let pair = AgentPair::new(agents[i].id, agents[j].id);
-                if self.ignored_pairs.contains(&pair) { continue; }
-
-                let (a, b) = (&agents[i], &agents[j]);
-
-                if a.current_point == b.current_point {
-                    self.notify(&CollisionEvent {
-                        agent1_id: a.id,
-                        agent2_id: b.id,
-                        collision_type: CollisionType::Direct,
-                        collision_point: a.current_point,
-                    });
-                    self.ignored_pairs.insert(pair);
-                    stats.collisions += 1;
-                } else if let Some(point) = Self::find_forward_collision(a, b) {
-                    self.notify(&CollisionEvent {
-                        agent1_id: a.id,
-                        agent2_id: b.id,
-                        collision_type: CollisionType::Proximity,
-                        collision_point: point,
-                    });
-                    self.ignored_pairs.insert(pair);
-                    stats.detections += 1;
-                }
-            }
-        }
-    }
-
-    fn find_forward_collision(a: &Agent, b: &Agent) -> Option<Node> {
         let b_set: HashSet<Node> = b.forward_path.iter().copied().collect();
 
         for &node in &a.forward_path {
             if b_set.contains(&node) || node == b.current_point {
-                return Some(node);
+                return Some(CollisionEvent {
+                    agent1_id: a.id,
+                    agent2_id: b.id,
+                    collision_type: CollisionType::Proximity,
+                    collision_point: node,
+                });
             }
         }
+
         for &node in &b.forward_path {
             if node == a.current_point {
-                return Some(node);
+                return Some(CollisionEvent {
+                    agent1_id: a.id,
+                    agent2_id: b.id,
+                    collision_type: CollisionType::Proximity,
+                    collision_point: node,
+                });
             }
         }
+
         None
+    }
+
+    fn name(&self) -> &str {
+        "Path-based"
+    }
+}
+
+struct GridCollisionStrategy;
+
+impl CollisionStrategy for GridCollisionStrategy {
+    fn detect(&self, a: &Agent, b: &Agent) -> Option<CollisionEvent> {
+        // Same cell
+        if a.current_point == b.current_point {
+            return Some(CollisionEvent {
+                agent1_id: a.id,
+                agent2_id: b.id,
+                collision_type: CollisionType::Direct,
+                collision_point: a.current_point,
+            });
+        }
+
+        // Any overlap in collision radius
+        let a_radius: HashSet<Node> = a.collision_radius.iter().copied().collect();
+
+        for &node in &b.collision_radius {
+            if a_radius.contains(&node) {
+                return Some(CollisionEvent {
+                    agent1_id: a.id,
+                    agent2_id: b.id,
+                    collision_type: CollisionType::Proximity,
+                    collision_point: node,
+                });
+            }
+        }
+
+        None
+    }
+
+    fn name(&self) -> &str {
+        "Grid-based"
     }
 }
 
@@ -493,11 +656,20 @@ impl CollisionObserver for CollisionLogger {
             CollisionType::Direct => {
                 println!(
                     "DIRECT COLLISION: agents {} and {} at ({}, {})",
-                    event.agent1_id, event.agent2_id,
-                    event.collision_point.x, event.collision_point.y,
+                    event.agent1_id,
+                    event.agent2_id,
+                    event.collision_point.x,
+                    event.collision_point.y,
                 );
             }
             CollisionType::Proximity => {
+                // println!(
+                //     "PROXIMITY DETECTED: agents {} and {} near ({}, {})",
+                //     event.agent1_id,
+                //     event.agent2_id,
+                //     event.collision_point.x,
+                //     event.collision_point.y,
+                // );
             }
         }
     }
@@ -514,7 +686,11 @@ struct RerouteRequest {
 }
 
 impl CollisionAssistant {
-    fn new() -> Self { CollisionAssistant { requests: RefCell::new(Vec::new()) } }
+    fn new() -> Self {
+        CollisionAssistant {
+            requests: RefCell::new(Vec::new()),
+        }
+    }
 
     fn take_requests(&self) -> Vec<RerouteRequest> {
         std::mem::take(&mut *self.requests.borrow_mut())
@@ -529,8 +705,14 @@ impl CollisionObserver for CollisionAssistant {
     fn on_collision(&self, event: &CollisionEvent) {
         if let CollisionType::Proximity = event.collision_type {
             let mut reqs = self.requests.borrow_mut();
-            reqs.push(RerouteRequest { agent_id: event.agent1_id, avoid_point: event.collision_point });
-            reqs.push(RerouteRequest { agent_id: event.agent2_id, avoid_point: event.collision_point });
+            reqs.push(RerouteRequest {
+                agent_id: event.agent1_id,
+                avoid_point: event.collision_point,
+            });
+            reqs.push(RerouteRequest {
+                agent_id: event.agent2_id,
+                avoid_point: event.collision_point,
+            });
         }
     }
 }
@@ -540,13 +722,20 @@ impl CollisionObserver for CollisionAssistant {
 // ---------------------------------------------------------------------------
 
 #[derive(Copy, Clone, PartialEq, Eq)]
-struct State { cost: i32, position: Node }
+struct State {
+    cost: i32,
+    position: Node,
+}
 
 impl Ord for State {
-    fn cmp(&self, other: &Self) -> Ordering { other.cost.cmp(&self.cost) }
+    fn cmp(&self, other: &Self) -> Ordering {
+        other.cost.cmp(&self.cost)
+    }
 }
 impl PartialOrd for State {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> { Some(self.cmp(other)) }
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 fn heuristic(a: Node, b: Node) -> i32 {
@@ -554,31 +743,42 @@ fn heuristic(a: Node, b: Node) -> i32 {
 }
 
 fn a_star(
-    start: Node, goal: Node,
-    walls: &HashSet<Node>, movement: &dyn MovementStrategy,
+    start: Node,
+    goal: Node,
+    walls: &HashSet<Node>,
+    movement: &dyn MovementStrategy,
 ) -> Option<Vec<Node>> {
     a_star_inner(start, goal, walls, &HashSet::new(), None, movement)
 }
 
 fn a_star_with_avoidance(
-    start: Node, goal: Node,
-    walls: &HashSet<Node>, avoid: &HashSet<Node>,
-    preferred_dir: Option<Node>, movement: &dyn MovementStrategy,
+    start: Node,
+    goal: Node,
+    walls: &HashSet<Node>,
+    avoid: &HashSet<Node>,
+    preferred_dir: Option<Node>,
+    movement: &dyn MovementStrategy,
 ) -> Option<Vec<Node>> {
     a_star_inner(start, goal, walls, avoid, preferred_dir, movement)
 }
 
 fn a_star_inner(
-    start: Node, goal: Node,
-    walls: &HashSet<Node>, avoid: &HashSet<Node>,
-    preferred_dir: Option<Node>, movement: &dyn MovementStrategy,
+    start: Node,
+    goal: Node,
+    walls: &HashSet<Node>,
+    avoid: &HashSet<Node>,
+    preferred_dir: Option<Node>,
+    movement: &dyn MovementStrategy,
 ) -> Option<Vec<Node>> {
     let mut open = BinaryHeap::new();
     let mut came_from = HashMap::new();
     let mut g_score: HashMap<Node, i32> = HashMap::new();
 
     g_score.insert(start, 0);
-    open.push(State { cost: heuristic(start, goal), position: start });
+    open.push(State {
+        cost: heuristic(start, goal),
+        position: start,
+    });
 
     while let Some(State { position, .. }) = open.pop() {
         if position == goal {
@@ -595,7 +795,9 @@ fn a_star_inner(
         let base_g = *g_score.get(&position).unwrap_or(&i32::MAX);
 
         for neighbor in movement.get_neighbors(position) {
-            if walls.contains(&neighbor) || avoid.contains(&neighbor) { continue; }
+            if walls.contains(&neighbor) || avoid.contains(&neighbor) {
+                continue;
+            }
 
             let mut tentative_g = base_g.saturating_add(1);
 
@@ -636,7 +838,10 @@ fn process_reroute_requests(
 ) {
     let mut by_point: HashMap<Node, Vec<usize>> = HashMap::new();
     for req in requests {
-        by_point.entry(req.avoid_point).or_default().push(req.agent_id);
+        by_point
+            .entry(req.avoid_point)
+            .or_default()
+            .push(req.agent_id);
     }
 
     for (collision_point, agent_ids) in &by_point {
@@ -644,13 +849,19 @@ fn process_reroute_requests(
 
         for (agent_id, avoid_set, pref_dir) in per_agent {
             let agent = &agents[agent_id];
-            let Some(goal) = agent.end_point else { continue };
+            let Some(goal) = agent.end_point else {
+                continue;
+            };
 
-            let pref = if is_zero_dir(pref_dir) { None } else { Some(pref_dir) };
+            let pref = if is_zero_dir(pref_dir) {
+                None
+            } else {
+                Some(pref_dir)
+            };
 
-            if let Some(new_path) = a_star_with_avoidance(
-                agent.current_point, goal, walls, &avoid_set, pref, movement,
-            ) {
+            if let Some(new_path) =
+                a_star_with_avoidance(agent.current_point, goal, walls, &avoid_set, pref, movement)
+            {
                 stats.recalculations += 1;
                 let agent = &mut agents[agent_id];
                 agent.path = Some(new_path);
@@ -666,16 +877,22 @@ fn compute_avoidance_plan(
     agent_ids: &[usize],
     collision_point: Node,
 ) -> Vec<(usize, HashSet<Node>, Node)> {
-    let dirs: Vec<(usize, Node)> = agent_ids.iter()
+    let dirs: Vec<(usize, Node)> = agent_ids
+        .iter()
         .filter_map(|&id| {
             let agent = &agents[id];
             let d = agent.direction();
             let final_dir = if is_zero_dir(d) {
-                agent.end_point.map(|g| Node {
-                    x: (g.x - agent.current_point.x).signum(),
-                    y: (g.y - agent.current_point.y).signum(),
-                }).unwrap_or(d)
-            } else { d };
+                agent
+                    .end_point
+                    .map(|g| Node {
+                        x: (g.x - agent.current_point.x).signum(),
+                        y: (g.y - agent.current_point.y).signum(),
+                    })
+                    .unwrap_or(d)
+            } else {
+                d
+            };
             Some((id, final_dir))
         })
         .collect();
@@ -711,14 +928,20 @@ fn compute_avoidance_plan(
     plan
 }
 
-fn make_avoid_entry(id: usize, collision_point: Node, avoid_dir: Node) -> (usize, HashSet<Node>, Node) {
+fn make_avoid_entry(
+    id: usize,
+    collision_point: Node,
+    avoid_dir: Node,
+) -> (usize, HashSet<Node>, Node) {
     let mut avoid = HashSet::new();
     avoid.insert(collision_point);
     let nudge = Node {
         x: collision_point.x + avoid_dir.x,
         y: collision_point.y + avoid_dir.y,
     };
-    if in_bounds(nudge) { avoid.insert(nudge); }
+    if in_bounds(nudge) {
+        avoid.insert(nudge);
+    }
     (id, avoid, avoid_dir)
 }
 
@@ -727,7 +950,11 @@ fn make_avoid_entry(id: usize, collision_point: Node, avoid_dir: Node) -> (usize
 // ---------------------------------------------------------------------------
 
 #[derive(Eq, PartialEq)]
-enum Step { Obstacles, Start, End }
+enum Step {
+    Obstacles,
+    Start,
+    End,
+}
 
 struct GameState {
     was_pressed: bool,
@@ -808,6 +1035,15 @@ fn handle_input(
         };
     }
 
+    // --- collision modes ---
+    if window.is_key_pressed(Key::C, minifb::KeyRepeat::No) {
+        collision_detector.set_strategy(if collision_detector.strategy.name() == "Path-based" {
+            Box::new(GridCollisionStrategy)
+        } else {
+            Box::new(PathCollisionStrategy)
+        });
+    }
+
     // --- undo / delete ---
     if window.is_key_pressed(Key::N, minifb::KeyRepeat::No) {
         history.undo(&mut state.step_history);
@@ -856,15 +1092,25 @@ fn handle_input(
 
         let mut total_len = 0;
         for agent in agents.iter_mut() {
-            let Some(goal) = agent.end_point else { continue };
-            if let Some(path) = a_star(agent.start_point, goal, &state.walls, state.movement_strategy.as_ref()) {
+            let Some(goal) = agent.end_point else {
+                continue;
+            };
+            if let Some(path) = a_star(
+                agent.start_point,
+                goal,
+                &state.walls,
+                state.movement_strategy.as_ref(),
+            ) {
                 total_len += path.len();
                 agent.path = Some(path);
                 agent.current_point = agent.start_point;
                 agent.path_index = 0;
                 agent.refresh_cache();
             } else {
-                println!("No path found for agent {} — goal may be blocked.", agent.id);
+                println!(
+                    "No path found for agent {} — goal may be blocked.",
+                    agent.id
+                );
             }
         }
         stats.total_path_length += total_len;
@@ -913,46 +1159,80 @@ fn render(buffer: &mut Vec<u32>, state: &GameState, agents: &[Agent], draw_radiu
     draw_matrix(buffer);
 
     for node in &state.walls {
-        draw(buffer, &DrawType::Square(SquareParams { x: node.ux(), y: node.uy(), color: BLACK }));
+        draw(
+            buffer,
+            &DrawType::Square(SquareParams {
+                x: node.ux(),
+                y: node.uy(),
+                color: BLACK,
+            }),
+        );
     }
 
     for agent in agents {
         if let Some(path) = &agent.path {
             for w in path.windows(2) {
                 let (a, b) = (w[0], w[1]);
-                draw(buffer, &DrawType::Line(LineParams {
-                    x0: a.x * CELL_HEIGHT as i32 + (CELL_WIDTH / 2) as i32,
-                    y0: a.y * CELL_WIDTH  as i32 + (CELL_HEIGHT / 2) as i32,
-                    x1: b.x * CELL_HEIGHT as i32 + (CELL_WIDTH / 2) as i32,
-                    y1: b.y * CELL_WIDTH  as i32 + (CELL_HEIGHT / 2) as i32,
-                    color: BLACK,
-                }));
+                draw(
+                    buffer,
+                    &DrawType::Line(LineParams {
+                        x0: a.x * CELL_HEIGHT as i32 + (CELL_WIDTH / 2) as i32,
+                        y0: a.y * CELL_WIDTH as i32 + (CELL_HEIGHT / 2) as i32,
+                        x1: b.x * CELL_HEIGHT as i32 + (CELL_WIDTH / 2) as i32,
+                        y1: b.y * CELL_WIDTH as i32 + (CELL_HEIGHT / 2) as i32,
+                        color: BLACK,
+                    }),
+                );
             }
         }
 
         if let Some(goal) = agent.end_point {
-            draw(buffer, &DrawType::Circle(CircleParams {
-                x: goal.ux(), y: goal.uy(), radius: 10, color: ORANGE,
-            }));
-        }
-
-        for &node in &agent.forward_path {
-            draw(buffer, &DrawType::Circle(CircleParams {
-                x: node.ux(), y: node.uy(), radius: 10, color: LIGHT_BLUE,
-            }));
+            draw(
+                buffer,
+                &DrawType::Circle(CircleParams {
+                    x: goal.ux(),
+                    y: goal.uy(),
+                    radius: 10,
+                    color: ORANGE,
+                }),
+            );
         }
 
         if draw_radius {
             for &node in &agent.collision_radius {
-                draw(buffer, &DrawType::Circle(CircleParams {
-                    x: node.ux(), y: node.uy(), radius: 10, color: PALE_RED,
-                }));
+                draw(
+                    buffer,
+                    &DrawType::Circle(CircleParams {
+                        x: node.ux(),
+                        y: node.uy(),
+                        radius: 10,
+                        color: PALE_RED,
+                    }),
+                );
+            }
+        } else {
+            for &node in &agent.forward_path {
+                draw(
+                    buffer,
+                    &DrawType::Circle(CircleParams {
+                        x: node.ux(),
+                        y: node.uy(),
+                        radius: 10,
+                        color: LIGHT_BLUE,
+                    }),
+                );
             }
         }
 
-        draw(buffer, &DrawType::Circle(CircleParams {
-            x: agent.current_point.ux(), y: agent.current_point.uy(), radius: 10, color: RED,
-        }));
+        draw(
+            buffer,
+            &DrawType::Circle(CircleParams {
+                x: agent.current_point.ux(),
+                y: agent.current_point.uy(),
+                radius: 10,
+                color: RED,
+            }),
+        );
     }
 }
 
@@ -965,23 +1245,40 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
     let mut history = CommandHistory::new();
     let mut agents: Vec<Agent> = Vec::new();
     let mut last_log = Instant::now();
+    let mut draw_radius = false;
 
-    let mut detector = CollisionDetector::new();
-    let logger    = Rc::new(CollisionLogger);
+    let mut detector = CollisionDetector::new(Box::new(PathCollisionStrategy));
+    let logger = Rc::new(CollisionLogger);
     let assistant = Rc::new(CollisionAssistant::new());
     detector.register_observer(logger);
     detector.register_observer(assistant.clone());
 
     while window.is_open() && !window.is_key_down(Key::Escape) {
-        handle_input(window, state, &mut agents, &mut history, &mut detector, &mut stats);
-        render(buffer, state, &agents, false);
+        if detector.strategy.name() == "Path-based" {
+            draw_radius = false;
+        } else {
+            draw_radius = true;
+        };
+
+        handle_input(
+            window,
+            state,
+            &mut agents,
+            &mut history,
+            &mut detector,
+            &mut stats,
+        );
+        render(buffer, state, &agents, draw_radius);
 
         detector.check_agents(&agents, &mut stats);
         if assistant.has_requests() {
             let requests = assistant.take_requests();
             process_reroute_requests(
-                &mut agents, &requests,
-                &state.walls, state.movement_strategy.as_ref(), &mut stats,
+                &mut agents,
+                &requests,
+                &state.walls,
+                state.movement_strategy.as_ref(),
+                &mut stats,
             );
         }
 
@@ -1005,7 +1302,11 @@ fn main() {
         Box::new(GameStateInitHandler),
     ];
 
-    let mut ctx = InitContext { window: None, buffer: None, game_state: None };
+    let mut ctx = InitContext {
+        window: None,
+        buffer: None,
+        game_state: None,
+    };
 
     for handler in handlers.iter_mut() {
         if let Err(e) = handler.initialize(&mut ctx) {
@@ -1014,8 +1315,8 @@ fn main() {
         }
     }
 
-    let mut window    = ctx.window.unwrap();
-    let mut buffer    = ctx.buffer.unwrap();
+    let mut window = ctx.window.unwrap();
+    let mut buffer = ctx.buffer.unwrap();
     let mut game_state = ctx.game_state.unwrap();
 
     game_loop(&mut window, &mut buffer, &mut game_state);
