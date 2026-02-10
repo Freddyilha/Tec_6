@@ -1,7 +1,10 @@
 use chrono::prelude::*;
 use csv::Writer;
+use dodgy_2d::{Agent as DodgyAgent, AvoidanceOptions};
+use glam::Vec2;
 use minifb::{Key, MouseButton, Window, WindowOptions};
 use rand::Rng;
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, HashSet};
@@ -10,10 +13,6 @@ use std::fs::OpenOptions;
 use std::path::Path;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
 
 const WIDTH: usize = 1000;
 const HEIGHT: usize = 1000;
@@ -26,13 +25,15 @@ const PALE_RED: u32 = 0x00FFF0F0;
 const BLACK: u32 = 0x00080808;
 const ORANGE: u32 = 0x00FF963C;
 const LIGHT_BLUE: u32 = 0x00ADD8E6;
+const DARK_BLUE: u32 = 0x003366;
 
 const CELL_WIDTH: usize = WIDTH / COLUMNS;
 const CELL_HEIGHT: usize = HEIGHT / ROWS;
+const NEIGHBOR_RADIUS: f32 = 60.0;
 
-// ---------------------------------------------------------------------------
-// Vector / grid helpers
-// ---------------------------------------------------------------------------
+fn perpendicular(v: Vec2) -> Vec2 {
+    Vec2 { x: -v.y, y: v.x }
+}
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 struct Node {
@@ -46,6 +47,20 @@ impl Node {
     }
     fn uy(self) -> usize {
         self.y as usize
+    }
+
+    fn to_pixels(self) -> Vec2 {
+        Vec2::new(
+            (self.x as f32 * CELL_WIDTH as f32) + (CELL_WIDTH as f32 / 2.0),
+            (self.y as f32 * CELL_HEIGHT as f32) + (CELL_HEIGHT as f32 / 2.0),
+        )
+    }
+
+    fn from_pixels(pos: Vec2) -> Self {
+        Node {
+            x: (pos.x / CELL_WIDTH as f32) as i32,
+            y: (pos.y / CELL_HEIGHT as f32) as i32,
+        }
     }
 }
 
@@ -77,10 +92,6 @@ fn negate(d: Node) -> Node {
 fn in_bounds(n: Node) -> bool {
     n.x >= 0 && n.y >= 0 && (n.x as usize) < COLUMNS && (n.y as usize) < ROWS
 }
-
-// ---------------------------------------------------------------------------
-// Statistics & CSV logging
-// ---------------------------------------------------------------------------
 
 struct Statistics {
     recalculations: usize,
@@ -132,10 +143,6 @@ fn save_statistics(stats: &Statistics) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Drawing primitives
-// ---------------------------------------------------------------------------
-
 struct LineParams {
     x0: i32,
     y0: i32,
@@ -185,7 +192,6 @@ fn draw_line(buffer: &mut [u32], p: &LineParams) {
         if x0 == x1 && y0 == y1 {
             break;
         }
-
         let e2 = 2 * err;
         if e2 >= dy {
             err += dy;
@@ -203,14 +209,9 @@ fn draw_circle(buffer: &mut [u32], p: &CircleParams) {
     let cy = p.y * CELL_WIDTH + CELL_HEIGHT / 2;
     let r2 = (p.radius * p.radius) as isize;
 
-    let y_lo = cy.saturating_sub(p.radius);
-    let y_hi = (cy + p.radius).min(HEIGHT - 1);
-    let x_lo = cx.saturating_sub(p.radius);
-    let x_hi = (cx + p.radius).min(WIDTH - 1);
-
-    for y in y_lo..=y_hi {
+    for y in cy.saturating_sub(p.radius)..=(cy + p.radius).min(HEIGHT - 1) {
         let dy = y as isize - cy as isize;
-        for x in x_lo..=x_hi {
+        for x in cx.saturating_sub(p.radius)..=(cx + p.radius).min(WIDTH - 1) {
             let dx = x as isize - cx as isize;
             if dx * dx + dy * dy <= r2 {
                 buffer[y * WIDTH + x] = p.color;
@@ -237,7 +238,7 @@ fn draw_matrix(buffer: &mut [u32]) {
                 y0: 0,
                 x1: px as i32,
                 y1: HEIGHT as i32,
-                color: BLACK,
+                color: WHITE,
             }),
         );
     }
@@ -250,15 +251,11 @@ fn draw_matrix(buffer: &mut [u32]) {
                 y0: py as i32,
                 x1: WIDTH as i32,
                 y1: py as i32,
-                color: BLACK,
+                color: WHITE,
             }),
         );
     }
 }
-
-// ---------------------------------------------------------------------------
-// Movement strategy (Strategy pattern)
-// ---------------------------------------------------------------------------
 
 trait MovementStrategy {
     fn get_neighbors(&self, node: Node) -> Vec<Node>;
@@ -310,10 +307,6 @@ impl MovementStrategy for DiagonalMovement {
         "Diagonal"
     }
 }
-
-// ---------------------------------------------------------------------------
-// Command pattern for wall/step history (undo / redo)
-// ---------------------------------------------------------------------------
 
 trait Command {
     fn execute(&mut self, steps: &mut Vec<Vec<Node>>);
@@ -381,11 +374,7 @@ impl CommandHistory {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Agent
-// ---------------------------------------------------------------------------
-
-#[derive(Clone, Eq, PartialEq, Debug)]
+#[derive(Clone, Debug)]
 struct Agent {
     id: usize,
     start_point: Node,
@@ -395,10 +384,18 @@ struct Agent {
     path_index: usize,
     collision_radius: Vec<Node>,
     forward_path: Vec<Node>,
+
+    // ORCA fields (for continuous movement mode)
+    position: Vec2,
+    velocity: Vec2,
+    max_speed: f32,
+    radius: f32,
 }
 
 impl Agent {
     fn new(id: usize, start: Node, end: Option<Node>) -> Self {
+        let position = start.to_pixels();
+
         let mut agent = Agent {
             id,
             start_point: start,
@@ -408,6 +405,10 @@ impl Agent {
             path_index: 0,
             collision_radius: Vec::with_capacity(8),
             forward_path: Vec::with_capacity(2),
+            position,
+            velocity: Vec2::ZERO,
+            max_speed: 200.0,
+            radius: 20.0,
         };
         agent.collision_radius = agent.calc_radius();
         agent
@@ -471,10 +472,6 @@ impl Agent {
         self.forward_path = self.calc_forward();
     }
 }
-
-// ---------------------------------------------------------------------------
-// Collision detection (Observer pattern)
-// ---------------------------------------------------------------------------
 
 trait CollisionStrategy {
     fn detect(&self, a: &Agent, b: &Agent) -> Option<CollisionEvent>;
@@ -612,7 +609,6 @@ struct GridCollisionStrategy;
 
 impl CollisionStrategy for GridCollisionStrategy {
     fn detect(&self, a: &Agent, b: &Agent) -> Option<CollisionEvent> {
-        // Same cell
         if a.current_point == b.current_point {
             return Some(CollisionEvent {
                 agent1_id: a.id,
@@ -622,7 +618,6 @@ impl CollisionStrategy for GridCollisionStrategy {
             });
         }
 
-        // Any overlap in collision radius
         let a_radius: HashSet<Node> = a.collision_radius.iter().copied().collect();
 
         for &node in &b.collision_radius {
@@ -644,9 +639,29 @@ impl CollisionStrategy for GridCollisionStrategy {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Collision observers
-// ---------------------------------------------------------------------------
+struct OrcaCollisionStrategy;
+
+impl CollisionStrategy for OrcaCollisionStrategy {
+    fn detect(&self, a: &Agent, b: &Agent) -> Option<CollisionEvent> {
+        let dist = a.position.distance(b.position);
+        let min_dist = a.radius + b.radius;
+
+        if dist < min_dist {
+            Some(CollisionEvent {
+                agent1_id: a.id,
+                agent2_id: b.id,
+                collision_type: CollisionType::Direct,
+                collision_point: Node::from_pixels(a.position),
+            })
+        } else {
+            None
+        }
+    }
+
+    fn name(&self) -> &str {
+        "ORCA"
+    }
+}
 
 struct CollisionLogger;
 
@@ -662,15 +677,7 @@ impl CollisionObserver for CollisionLogger {
                     event.collision_point.y,
                 );
             }
-            CollisionType::Proximity => {
-                // println!(
-                //     "PROXIMITY DETECTED: agents {} and {} near ({}, {})",
-                //     event.agent1_id,
-                //     event.agent2_id,
-                //     event.collision_point.x,
-                //     event.collision_point.y,
-                // );
-            }
+            CollisionType::Proximity => {}
         }
     }
 }
@@ -716,10 +723,6 @@ impl CollisionObserver for CollisionAssistant {
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// A* pathfinding
-// ---------------------------------------------------------------------------
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 struct State {
@@ -824,10 +827,6 @@ fn a_star_inner(
     }
     None
 }
-
-// ---------------------------------------------------------------------------
-// Reroute logic
-// ---------------------------------------------------------------------------
 
 fn process_reroute_requests(
     agents: &mut [Agent],
@@ -945,10 +944,6 @@ fn make_avoid_entry(
     (id, avoid, avoid_dir)
 }
 
-// ---------------------------------------------------------------------------
-// Game state & initialization (Chain of Responsibility)
-// ---------------------------------------------------------------------------
-
 #[derive(Eq, PartialEq)]
 enum Step {
     Obstacles,
@@ -981,8 +976,13 @@ struct GameStateInitHandler;
 impl InitHandler for WindowInitHandler {
     fn initialize(&mut self, ctx: &mut InitContext) -> Result<(), String> {
         ctx.window = Some(
-            Window::new("Navigation grid", WIDTH, HEIGHT, WindowOptions::default())
-                .map_err(|e| format!("Window creation failed: {:?}", e))?,
+            Window::new(
+                "Navigation grid - Hybrid",
+                WIDTH,
+                HEIGHT,
+                WindowOptions::default(),
+            )
+            .map_err(|e| format!("Window creation failed: {:?}", e))?,
         );
         Ok(())
     }
@@ -1008,9 +1008,19 @@ impl InitHandler for GameStateInitHandler {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Input handling
-// ---------------------------------------------------------------------------
+fn draw_circle_at_pixels(buffer: &mut [u32], cx: usize, cy: usize, radius: usize, color: u32) {
+    let r2 = (radius * radius) as isize;
+
+    for y in cy.saturating_sub(radius)..=(cy + radius).min(HEIGHT - 1) {
+        let dy = y as isize - cy as isize;
+        for x in cx.saturating_sub(radius)..=(cx + radius).min(WIDTH - 1) {
+            let dx = x as isize - cx as isize;
+            if dx * dx + dy * dy <= r2 {
+                buffer[y * WIDTH + x] = color;
+            }
+        }
+    }
+}
 
 fn handle_input(
     window: &Window,
@@ -1020,7 +1030,6 @@ fn handle_input(
     collision_detector: &mut CollisionDetector,
     stats: &mut Statistics,
 ) {
-    // --- mode switches ---
     if window.is_key_pressed(Key::Space, minifb::KeyRepeat::No) {
         state.current_step = Step::Start;
     }
@@ -1035,16 +1044,16 @@ fn handle_input(
         };
     }
 
-    // --- collision modes ---
     if window.is_key_pressed(Key::C, minifb::KeyRepeat::No) {
-        collision_detector.set_strategy(if collision_detector.strategy.name() == "Path-based" {
-            Box::new(GridCollisionStrategy)
-        } else {
-            Box::new(PathCollisionStrategy)
+        let current = collision_detector.strategy.name();
+        collision_detector.set_strategy(match current {
+            "Path-based" => Box::new(GridCollisionStrategy),
+            "Grid-based" => Box::new(OrcaCollisionStrategy),
+            _ => Box::new(PathCollisionStrategy),
         });
+        println!("Switched to: {}", collision_detector.strategy.name());
     }
 
-    // --- undo / delete ---
     if window.is_key_pressed(Key::N, minifb::KeyRepeat::No) {
         history.undo(&mut state.step_history);
     }
@@ -1052,22 +1061,129 @@ fn handle_input(
         history.execute(Box::new(DeleteCommand::new(1)), &mut state.step_history);
     }
 
-    // --- step agents forward one tick ---
-    if window.is_key_pressed(Key::W, minifb::KeyRepeat::No) {
-        for agent in agents.iter_mut() {
-            if let Some(path) = &agent.path {
-                if agent.path_index + 1 < path.len() {
-                    agent.path_index += 1;
-                    agent.current_point = path[agent.path_index];
-                    agent.refresh_cache();
-                }
+    if window.is_key_pressed(Key::W, minifb::KeyRepeat::Yes) {
+        if collision_detector.strategy.name() == "ORCA" {
+            let delta_time = 1.0 / 60.0;
+
+            let dodgy_agents: Vec<DodgyAgent> = agents
+                .iter()
+                .map(|a| DodgyAgent {
+                    position: a.position,
+                    velocity: a.velocity,
+                    radius: a.radius,
+                    avoidance_responsibility: 1.0,
+                })
+                .collect();
+
+            let mut new_velocities = Vec::with_capacity(agents.len());
+
+            for i in 0..agents.len() {
+                let mut neighbors: Vec<Cow<DodgyAgent>> = dodgy_agents
+                    .iter()
+                    .enumerate()
+                    .filter(|(j, other)| {
+                        *j != i && agents[i].position.distance(other.position) < NEIGHBOR_RADIUS
+                    })
+                    .map(|(_, agent)| Cow::Borrowed(agent))
+                    .collect();
+
+                neighbors.sort_by(|a, b| {
+                    agents[i]
+                        .position
+                        .distance(a.position)
+                        .partial_cmp(&agents[i].position.distance(b.position))
+                        .unwrap()
+                });
+
+                let preferred_velocity = if let Some(goal) = agents[i].end_point {
+                    let goal_pos = goal.to_pixels();
+                    let to_goal = goal_pos - agents[i].position;
+                    let dist = to_goal.length();
+
+                    if dist <= agents[i].radius {
+                        agents[i].position = goal_pos;
+                        Vec2::ZERO
+                    } else {
+                        to_goal.normalize_or_zero() * agents[i].max_speed
+                    }
+                } else {
+                    Vec2::ZERO
+                };
+
+                let nearest_dist = neighbors
+                    .iter()
+                    .map(|n| agents[i].position.distance(n.position))
+                    .fold(f32::INFINITY, f32::min);
+
+                let reaction_radius = NEIGHBOR_RADIUS;
+                let min_react = agents[i].radius * 2.0;
+
+                let t = ((reaction_radius - nearest_dist) / (reaction_radius - min_react))
+                    .clamp(0.0, 1.0);
+
+                let scaled_pref = preferred_velocity * t.max(0.1);
+
+                let orca_velocity = if neighbors.is_empty() {
+                    preferred_velocity
+                } else {
+                    dodgy_agents[i].compute_avoiding_velocity(
+                        &neighbors,
+                        &[],
+                        scaled_pref,
+                        delta_time,
+                        agents[i].max_speed,
+                        &AvoidanceOptions {
+                            obstacle_margin: 0.2,
+                            time_horizon: 2.0,
+                            obstacle_time_horizon: 1.2,
+                        },
+                    )
+                };
+
+                let avoiding_velocity = if orca_velocity.length() >= 1.0 {
+                    orca_velocity
+                } else if let Some(other) = neighbors.first() {
+                    let rel_pos = other.position - agents[i].position;
+                    let rel_vel = preferred_velocity - other.velocity;
+
+                    let forward = preferred_velocity.normalize_or_zero();
+                    let perp = Vec2::new(-forward.y, forward.x);
+
+                    let cross = rel_pos.x * rel_vel.y - rel_pos.y * rel_vel.x;
+                    let side = cross.signum().max(1.0);
+
+                    let dodge = (forward * 0.6) + (perp * side * 0.8);
+                    dodge.normalize_or_zero() * agents[i].max_speed * 0.9
+                } else {
+                    Vec2::ZERO
+                };
+
+                new_velocities.push(avoiding_velocity);
             }
-            stats.total_steps += 1;
+
+            for (i, agent) in agents.iter_mut().enumerate() {
+                agent.velocity = new_velocities[i];
+                agent.position += agent.velocity * delta_time;
+
+                stats.total_steps += 1;
+            }
+        } else {
+            for agent in agents.iter_mut() {
+                if let Some(path) = &agent.path {
+                    if agent.path_index + 1 < path.len() {
+                        agent.path_index += 1;
+                        agent.current_point = path[agent.path_index];
+                        agent.position = agent.current_point.to_pixels();
+                        agent.refresh_cache();
+                    }
+                }
+                stats.total_steps += 1;
+            }
         }
+
         collision_detector.ignored_pairs.clear();
     }
 
-    // --- spawn random agents ---
     if window.is_key_pressed(Key::R, minifb::KeyRepeat::No) {
         let mut rng = rand::rng();
         let count = rng.random_range(3..=12);
@@ -1085,7 +1201,6 @@ fn handle_input(
         }
     }
 
-    // --- compute / recompute all paths ---
     if window.is_key_pressed(Key::A, minifb::KeyRepeat::No) {
         state.step_history.clear();
         history.history.clear();
@@ -1104,19 +1219,16 @@ fn handle_input(
                 total_len += path.len();
                 agent.path = Some(path);
                 agent.current_point = agent.start_point;
+                agent.position = agent.start_point.to_pixels();
                 agent.path_index = 0;
                 agent.refresh_cache();
             } else {
-                println!(
-                    "No path found for agent {} — goal may be blocked.",
-                    agent.id
-                );
+                println!("No path found for agent {}", agent.id);
             }
         }
         stats.total_path_length += total_len;
     }
 
-    // --- mouse click: place walls or agents ---
     let is_pressed = window.get_mouse_down(MouseButton::Left);
     if is_pressed && !state.was_pressed {
         if let Some((mx, my)) = window.get_mouse_pos(minifb::MouseMode::Clamp) {
@@ -1150,12 +1262,14 @@ fn handle_input(
     state.was_pressed = is_pressed;
 }
 
-// ---------------------------------------------------------------------------
-// Rendering
-// ---------------------------------------------------------------------------
-
-fn render(buffer: &mut Vec<u32>, state: &GameState, agents: &[Agent], draw_radius: bool) {
-    buffer.fill(WHITE);
+fn render(
+    buffer: &mut Vec<u32>,
+    state: &GameState,
+    agents: &[Agent],
+    draw_radius: bool,
+    is_orca: bool,
+) {
+    buffer.fill(BLACK);
     draw_matrix(buffer);
 
     for node in &state.walls {
@@ -1164,7 +1278,7 @@ fn render(buffer: &mut Vec<u32>, state: &GameState, agents: &[Agent], draw_radiu
             &DrawType::Square(SquareParams {
                 x: node.ux(),
                 y: node.uy(),
-                color: BLACK,
+                color: WHITE,
             }),
         );
     }
@@ -1180,7 +1294,7 @@ fn render(buffer: &mut Vec<u32>, state: &GameState, agents: &[Agent], draw_radiu
                         y0: a.y * CELL_WIDTH as i32 + (CELL_HEIGHT / 2) as i32,
                         x1: b.x * CELL_HEIGHT as i32 + (CELL_WIDTH / 2) as i32,
                         y1: b.y * CELL_WIDTH as i32 + (CELL_HEIGHT / 2) as i32,
-                        color: BLACK,
+                        color: WHITE,
                     }),
                 );
             }
@@ -1210,7 +1324,7 @@ fn render(buffer: &mut Vec<u32>, state: &GameState, agents: &[Agent], draw_radiu
                     }),
                 );
             }
-        } else {
+        } else if !is_orca {
             for &node in &agent.forward_path {
                 draw(
                     buffer,
@@ -1224,28 +1338,38 @@ fn render(buffer: &mut Vec<u32>, state: &GameState, agents: &[Agent], draw_radiu
             }
         }
 
-        draw(
-            buffer,
-            &DrawType::Circle(CircleParams {
-                x: agent.current_point.ux(),
-                y: agent.current_point.uy(),
-                radius: 10,
-                color: RED,
-            }),
-        );
+        let (grid_x, grid_y) = if is_orca {
+            (
+                (agent.position.x / CELL_WIDTH as f32) as usize,
+                (agent.position.y / CELL_HEIGHT as f32) as usize,
+            )
+        } else {
+            (agent.current_point.ux(), agent.current_point.uy())
+        };
+
+        if is_orca {
+            let px = agent.position.x.max(0.0).min((WIDTH - 1) as f32) as usize;
+            let py = agent.position.y.max(0.0).min((HEIGHT - 1) as f32) as usize;
+            draw_circle_at_pixels(buffer, px, py, agent.radius as usize, RED);
+        } else {
+            draw(
+                buffer,
+                &DrawType::Circle(CircleParams {
+                    x: agent.current_point.ux(),
+                    y: agent.current_point.uy(),
+                    radius: 10,
+                    color: RED,
+                }),
+            );
+        }
     }
 }
-
-// ---------------------------------------------------------------------------
-// Main game loop
-// ---------------------------------------------------------------------------
 
 fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) {
     let mut stats = Statistics::new();
     let mut history = CommandHistory::new();
     let mut agents: Vec<Agent> = Vec::new();
     let mut last_log = Instant::now();
-    let mut draw_radius = false;
 
     let mut detector = CollisionDetector::new(Box::new(PathCollisionStrategy));
     let logger = Rc::new(CollisionLogger);
@@ -1254,11 +1378,8 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
     detector.register_observer(assistant.clone());
 
     while window.is_open() && !window.is_key_down(Key::Escape) {
-        if detector.strategy.name() == "Path-based" {
-            draw_radius = false;
-        } else {
-            draw_radius = true;
-        };
+        let is_orca = detector.strategy.name() == "ORCA";
+        let draw_radius = detector.strategy.name() == "Grid-based";
 
         handle_input(
             window,
@@ -1268,32 +1389,32 @@ fn game_loop(window: &mut Window, buffer: &mut Vec<u32>, state: &mut GameState) 
             &mut detector,
             &mut stats,
         );
-        render(buffer, state, &agents, draw_radius);
+        render(buffer, state, &agents, draw_radius, is_orca);
 
-        detector.check_agents(&agents, &mut stats);
-        if assistant.has_requests() {
-            let requests = assistant.take_requests();
-            process_reroute_requests(
-                &mut agents,
-                &requests,
-                &state.walls,
-                state.movement_strategy.as_ref(),
-                &mut stats,
-            );
+        if !is_orca {
+            detector.check_agents(&agents, &mut stats);
+            if assistant.has_requests() {
+                let requests = assistant.take_requests();
+                process_reroute_requests(
+                    &mut agents,
+                    &requests,
+                    &state.walls,
+                    state.movement_strategy.as_ref(),
+                    &mut stats,
+                );
+            }
+        } else {
+            detector.check_agents(&agents, &mut stats);
         }
 
         if last_log.elapsed() >= Duration::from_secs(1) {
-            save_statistics(&stats).unwrap();
+            let _ = save_statistics(&stats);
             last_log = Instant::now();
         }
 
         window.update_with_buffer(buffer, WIDTH, HEIGHT).unwrap();
     }
 }
-
-// ---------------------------------------------------------------------------
-// Entry point
-// ---------------------------------------------------------------------------
 
 fn main() {
     let mut handlers: Vec<Box<dyn InitHandler>> = vec![
