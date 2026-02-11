@@ -5,10 +5,8 @@ plt.rcParams["figure.figsize"] = (10, 6)
 
 df = pd.read_csv("stats.csv", parse_dates=["timestamp"])
 
-# Keep only relevant methods
 df = df[df["method_name"].isin(["GRID", "PATH","ORCA"])]
 
-# Take only the FINAL row of each method run
 final = df.groupby("method_name").tail(1).copy()
 
 print("\nFinal results per method:")
