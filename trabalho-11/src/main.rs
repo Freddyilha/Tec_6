@@ -28,7 +28,7 @@ const LIGHT_BLUE: u32 = 0x00ADD8E6;
 
 const CELL_WIDTH: usize = WIDTH / COLUMNS;
 const CELL_HEIGHT: usize = HEIGHT / ROWS;
-const NEIGHBOR_RADIUS: f32 = 60.0;
+const NEIGHBOR_RADIUS: f32 = 80.0;
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 struct Node {
