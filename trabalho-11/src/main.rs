@@ -25,15 +25,10 @@ const PALE_RED: u32 = 0x00FFF0F0;
 const BLACK: u32 = 0x00080808;
 const ORANGE: u32 = 0x00FF963C;
 const LIGHT_BLUE: u32 = 0x00ADD8E6;
-const DARK_BLUE: u32 = 0x003366;
 
 const CELL_WIDTH: usize = WIDTH / COLUMNS;
 const CELL_HEIGHT: usize = HEIGHT / ROWS;
 const NEIGHBOR_RADIUS: f32 = 60.0;
-
-fn perpendicular(v: Vec2) -> Vec2 {
-    Vec2 { x: -v.y, y: v.x }
-}
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 struct Node {
@@ -82,9 +77,6 @@ fn is_zero_dir(d: Node) -> bool {
 fn rotate_right(d: Node) -> Node {
     Node { x: d.y, y: -d.x }
 }
-fn rotate_left(d: Node) -> Node {
-    Node { x: -d.y, y: d.x }
-}
 fn negate(d: Node) -> Node {
     Node { x: -d.x, y: -d.y }
 }
@@ -99,6 +91,10 @@ struct Statistics {
     detections: usize,
     total_path_length: usize,
     total_steps: usize,
+    agents: usize,
+    method_name: String,
+    actual_distance: f32,
+    reached_goal_count: usize,
 }
 
 impl Statistics {
@@ -109,6 +105,10 @@ impl Statistics {
             detections: 0,
             total_path_length: 0,
             total_steps: 0,
+            agents: 0,
+            method_name: String::new(),
+            actual_distance: 0.0,
+            reached_goal_count: 0,
         }
     }
 }
@@ -127,6 +127,10 @@ fn save_statistics(stats: &Statistics) -> Result<(), Box<dyn Error>> {
             "detections",
             "total_path_length",
             "total_steps",
+            "agents",
+            "method_name",
+            "actual_distance",
+            "reached_goal_count",
         ])?;
     }
 
@@ -137,6 +141,10 @@ fn save_statistics(stats: &Statistics) -> Result<(), Box<dyn Error>> {
         stats.detections.to_string(),
         stats.total_path_length.to_string(),
         stats.total_steps.to_string(),
+        stats.agents.to_string(),
+        stats.method_name.to_string(),
+        stats.actual_distance.to_string(),
+        stats.reached_goal_count.to_string(),
     ])?;
 
     wtr.flush()?;
@@ -385,11 +393,12 @@ struct Agent {
     collision_radius: Vec<Node>,
     forward_path: Vec<Node>,
 
-    // ORCA fields (for continuous movement mode)
     position: Vec2,
     velocity: Vec2,
     max_speed: f32,
     radius: f32,
+    last_position: Vec2,
+    finished: bool,
 }
 
 impl Agent {
@@ -409,6 +418,8 @@ impl Agent {
             velocity: Vec2::ZERO,
             max_speed: 200.0,
             radius: 20.0,
+            last_position: position,
+            finished: false,
         };
         agent.collision_radius = agent.calc_radius();
         agent
@@ -1051,6 +1062,22 @@ fn handle_input(
             "Grid-based" => Box::new(OrcaCollisionStrategy),
             _ => Box::new(PathCollisionStrategy),
         });
+
+        stats.collisions = 0;
+        stats.detections = 0;
+        stats.recalculations = 0;
+        stats.total_steps = 0;
+        stats.total_path_length = 0;
+        stats.reached_goal_count = 0;
+
+        if collision_detector.strategy.name() == "ORCA" {
+            stats.method_name = "ORCA".to_owned();
+        } else if collision_detector.strategy.name() == "Grid-based" {
+            stats.method_name = "GRID".to_owned();
+        } else {
+            stats.method_name = "PATH".to_owned();
+        }
+
         println!("Switched to: {}", collision_detector.strategy.name());
     }
 
@@ -1110,31 +1137,18 @@ fn handle_input(
                     Vec2::ZERO
                 };
 
-                let nearest_dist = neighbors
-                    .iter()
-                    .map(|n| agents[i].position.distance(n.position))
-                    .fold(f32::INFINITY, f32::min);
-
-                let reaction_radius = NEIGHBOR_RADIUS;
-                let min_react = agents[i].radius * 2.0;
-
-                let t = ((reaction_radius - nearest_dist) / (reaction_radius - min_react))
-                    .clamp(0.0, 1.0);
-
-                let scaled_pref = preferred_velocity * t.max(0.1);
-
                 let orca_velocity = if neighbors.is_empty() {
                     preferred_velocity
                 } else {
                     dodgy_agents[i].compute_avoiding_velocity(
                         &neighbors,
                         &[],
-                        scaled_pref,
+                        preferred_velocity,
                         delta_time,
                         agents[i].max_speed,
                         &AvoidanceOptions {
-                            obstacle_margin: 0.2,
-                            time_horizon: 2.0,
+                            obstacle_margin: 0.4,
+                            time_horizon: 3.0,
                             obstacle_time_horizon: 1.2,
                         },
                     )
@@ -1159,16 +1173,32 @@ fn handle_input(
                 };
 
                 new_velocities.push(avoiding_velocity);
+
+                if let Some(goal) = agents[i].end_point {
+                    let goal_pos = goal.to_pixels();
+                    if !agents[i].finished
+                        && agents[i].position.distance(goal_pos) < agents[i].radius
+                    {
+                        agents[i].finished = true;
+                        stats.reached_goal_count += 1;
+                    }
+                }
             }
 
             for (i, agent) in agents.iter_mut().enumerate() {
+                agent.last_position = agent.position;
+
                 agent.velocity = new_velocities[i];
                 agent.position += agent.velocity * delta_time;
+
+                let step_dist = agent.position.distance(agent.last_position);
+                stats.actual_distance += step_dist;
 
                 stats.total_steps += 1;
             }
         } else {
             for agent in agents.iter_mut() {
+                agent.last_position = agent.position;
                 if let Some(path) = &agent.path {
                     if agent.path_index + 1 < path.len() {
                         agent.path_index += 1;
@@ -1177,7 +1207,18 @@ fn handle_input(
                         agent.refresh_cache();
                     }
                 }
+                let step_dist = agent.position.distance(agent.last_position);
+
+                stats.actual_distance += step_dist;
                 stats.total_steps += 1;
+
+                if let Some(goal) = agent.end_point {
+                    let goal_pos = goal.to_pixels();
+                    if !agent.finished && agent.position.distance(goal_pos) < agent.radius {
+                        agent.finished = true;
+                        stats.reached_goal_count += 1;
+                    }
+                }
             }
         }
 
@@ -1187,6 +1228,8 @@ fn handle_input(
     if window.is_key_pressed(Key::R, minifb::KeyRepeat::No) {
         let mut rng = rand::rng();
         let count = rng.random_range(3..=12);
+
+        stats.agents += count;
         for _ in 0..count {
             let id = agents.len();
             let start = Node {
