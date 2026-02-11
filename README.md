@@ -10,3 +10,6 @@
 |Factory|[trabalho-6](https://github.com/Freddyilha/Tec_6/tree/main/trabalho-6)|Tue Nov 18 21:50:36|Sim|
 |Patterns 1|[trabalho-7](https://github.com/Freddyilha/Tec_6/tree/main/trabalho-7)|Tue Nov 25 18:23:49 2025|Não|
 |Patterns 2|[trabalho-8](https://github.com/Freddyilha/Tec_6/tree/main/trabalho-8)|Tue Nov 25 22:12: 2025|Sim|
+|Observer|[trabalho-9](https://github.com/Freddyilha/Tec_6/tree/main/trabalho-9)|Tue Dec 07 22:12: 2025|Sim|
+|More collisions|[trabalho-10](https://github.com/Freddyilha/Tec_6/tree/main/trabalho-10)|Tue Dec 24 22:12: 2025|Sim|
+|ORCA|[trabalho-11](https://github.com/Freddyilha/Tec_6/tree/main/trabalho-11)|Tue Feb 10 23:05: 2026|Sim|
